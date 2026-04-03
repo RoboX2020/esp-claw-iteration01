@@ -35,7 +35,7 @@ logger = logging.getLogger('idf_build_apps')
 IDF_PATH = os.getenv('IDF_PATH', '')
 BOARD_NAME = 'default'
 
-PROJECT_ROOT = Path(__file__).parent.parent.absolute()
+PROJECT_ROOT = Path(__file__).parent.parent.parent.absolute()
 APPS_BUILD_PER_JOB = 30
 IGNORE_WARNINGS = [
     r'memory region \`iram_loader_seg\' not declared',
@@ -255,9 +255,7 @@ def get_cmake_apps(
         no_preserve=False,
         default_build_targets=default_build_targets,
         manifest_files=[
-            str(Path(PROJECT_ROOT) /'components'/'.build-rules.yml'),
-            str(Path(PROJECT_ROOT) /'examples'/'.build-rules.yml'),
-            str(Path(PROJECT_ROOT) /'tools'/'.build-rules.yml'),
+            str(Path(PROJECT_ROOT) /'application'/'.build-rules.yml'),
         ],
         build_system=CustomApp,
     )

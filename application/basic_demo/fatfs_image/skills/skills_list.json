@@ -1,0 +1,34 @@
+{
+  "skills": [
+    {
+      "id": "weather",
+      "file": "weather.md",
+      "title": "Weather",
+      "summary": "Get current weather and forecast information with web search."
+    },
+    {
+      "id": "lua_write",
+      "file": "lua_write.md",
+      "title": "Lua Script Authoring",
+      "summary": "Write managed Lua scripts with the correct runtime modules, path rules, and syntax constraints."
+    },
+    {
+      "id": "lua_run",
+      "file": "lua_run.md",
+      "title": "Lua Script Execution",
+      "summary": "List and run managed Lua scripts, including async execution and job inspection."
+    },
+    {
+      "id": "im_send_file",
+      "file": "im_send_file.md",
+      "title": "IM Send File",
+      "summary": "Send an existing local non-image file to a Telegram or QQ chat."
+    },
+    {
+      "id": "im_send_picture",
+      "file": "im_send_picture.md",
+      "title": "IM Send Picture",
+      "summary": "Send an existing local image to a Telegram or QQ chat."
+    }
+  ]
+}

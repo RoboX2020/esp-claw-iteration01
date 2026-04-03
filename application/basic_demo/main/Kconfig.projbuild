@@ -1,0 +1,117 @@
+menu "Basic Demo Config"
+
+config BASIC_DEMO_WIFI_SSID
+    string "Default Wi-Fi SSID"
+    default ""
+    help
+        Default Wi-Fi SSID used to populate basic demo settings.
+
+config BASIC_DEMO_WIFI_PASSWORD
+    string "Default Wi-Fi password"
+    default ""
+    help
+        Default Wi-Fi password used to populate basic demo settings.
+
+config BASIC_DEMO_LLM_API_KEY
+    string "Default LLM API key"
+    default ""
+    help
+        Default API key used to populate the basic demo LLM settings.
+
+config BASIC_DEMO_LLM_BACKEND_TYPE
+    string "Default LLM backend type"
+    default "openai_compatible"
+    help
+        Default backend type for claw_core, for example openai_compatible or custom.
+
+config BASIC_DEMO_LLM_PROFILE
+    string "Default LLM profile"
+    default "qwen_compatible"
+    help
+        Default runtime profile for claw_core, for example openai, qwen_compatible, or custom_openai_compatible.
+
+config BASIC_DEMO_LLM_MODEL
+    string "Default LLM model"
+    default "qwen3-max-2026-01-23"
+    help
+        Default model name for claw_core requests.
+
+config BASIC_DEMO_LLM_BASE_URL
+    string "Default LLM base URL"
+    default ""
+    help
+        Optional override for the selected LLM profile base URL.
+
+config BASIC_DEMO_LLM_AUTH_TYPE
+    string "Default LLM auth type"
+    default "bearer"
+    help
+        Auth mode for the LLM backend, for example bearer, api-key, or none.
+
+config BASIC_DEMO_LLM_TIMEOUT_MS
+    string "Default LLM timeout ms"
+    default "120000"
+    help
+        Timeout in milliseconds for outbound LLM HTTP requests.
+
+config BASIC_DEMO_QQ_APP_ID
+    string "Default QQ app ID"
+    default ""
+    help
+        Default QQ app ID used by the IM cap.
+
+config BASIC_DEMO_QQ_APP_SECRET
+    string "Default QQ app secret"
+    default ""
+    help
+        Default QQ app secret used by the IM cap.
+
+config BASIC_DEMO_TG_BOT_TOKEN
+    string "Default Telegram bot token"
+    default ""
+    help
+        Default Telegram bot token used by the IM cap.
+
+config BASIC_DEMO_WECHAT_TOKEN
+    string "Default WeChat token"
+    default ""
+    help
+        Default WeChat bot token used by the IM cap.
+
+config BASIC_DEMO_WECHAT_BASE_URL
+    string "Default WeChat base URL"
+    default "https://ilinkai.weixin.qq.com"
+    help
+        Default WeChat API base URL used by the IM cap.
+
+config BASIC_DEMO_WECHAT_CDN_BASE_URL
+    string "Default WeChat CDN base URL"
+    default "https://novac2c.cdn.weixin.qq.com/c2c"
+    help
+        Default WeChat CDN base URL used for media upload and download.
+
+config BASIC_DEMO_WECHAT_ACCOUNT_ID
+    string "Default WeChat account ID"
+    default "default"
+    help
+        Default logical account ID for local WeChat channel state.
+
+config BASIC_DEMO_SEARCH_BRAVE_KEY
+    string "Default Brave Search API key"
+    default ""
+    help
+        Default Brave Search API key for the web search cap.
+
+config BASIC_DEMO_SEARCH_TAVILY_KEY
+    string "Default Tavily API key"
+    default ""
+    help
+        Default Tavily API key for the web search cap.
+
+config BASIC_DEMO_TIME_TIMEZONE
+    string "Default time cap timezone"
+    default "UTC0"
+    help
+        POSIX-style timezone string used by the time cap.
+
+endmenu

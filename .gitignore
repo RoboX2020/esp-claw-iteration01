@@ -1,0 +1,41 @@
+# Build output
+build/
+dist/
+tmp/
+releases/
+
+# ESP-IDF
+sdkconfig
+sdkconfig.old
+dependencies.lock
+managed_components/
+
+# IDE / Editor
+.vscode/
+.devcontainer/
+.idea/
+.clangd
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+# Cache / Compiled
+.cache
+*.pyc
+*.bin
+
+# MCP / Memov
+.mcp.json
+.mem/
+.memignore
+# OS
+.DS_Store
+Thumbs.db
+references/
+.venv/
+
+.codex
+openspec
+AGENTS.md

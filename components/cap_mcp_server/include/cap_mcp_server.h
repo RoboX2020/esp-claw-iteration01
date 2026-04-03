@@ -1,0 +1,29 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+#pragma once
+
+#include <stdint.h>
+
+#include "esp_err.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct {
+    const char *hostname;
+    const char *instance_name;
+    const char *endpoint;
+    uint16_t server_port;
+    uint16_t ctrl_port;
+} cap_mcp_server_config_t;
+
+esp_err_t cap_mcp_server_register_group(void);
+esp_err_t cap_mcp_server_set_config(const cap_mcp_server_config_t *config);
+
+#ifdef __cplusplus
+}
+#endif

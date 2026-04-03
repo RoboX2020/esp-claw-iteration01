@@ -1,0 +1,196 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+#include "cmd_claw_event_router.h"
+
+#include <inttypes.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "argtable3/argtable3.h"
+#include "cJSON.h"
+#include "claw_event_router.h"
+#include "esp_console.h"
+
+static struct {
+    struct arg_lit *reload;
+    struct arg_lit *rules;
+    struct arg_str *rule;
+    struct arg_lit *last;
+    struct arg_lit *emit_message;
+    struct arg_lit *emit_trigger;
+    struct arg_str *source_cap;
+    struct arg_str *channel;
+    struct arg_str *chat_id;
+    struct arg_str *text;
+    struct arg_str *event_type;
+    struct arg_str *event_key;
+    struct arg_str *payload_json;
+    struct arg_end *end;
+} router_args;
+
+static int event_router_func(int argc, char **argv)
+{
+    claw_event_router_result_t result = {0};
+    char *output = NULL;
+    esp_err_t err;
+    int nerrors = arg_parse(argc, argv, (void **)&router_args);
+    int operation_count;
+
+    if (nerrors != 0) {
+        arg_print_errors(stderr, router_args.end, argv[0]);
+        return 1;
+    }
+
+    operation_count = router_args.reload->count + router_args.rules->count + router_args.rule->count +
+                      router_args.last->count + router_args.emit_message->count +
+                      router_args.emit_trigger->count;
+    if (operation_count != 1) {
+        printf("Exactly one operation must be specified\n");
+        return 1;
+    }
+
+    if (router_args.reload->count) {
+        err = claw_event_router_reload();
+        if (err != ESP_OK) {
+            printf("event_router reload failed: %s\n", esp_err_to_name(err));
+            return 1;
+        }
+        printf("automation rules reloaded\n");
+        return 0;
+    }
+
+    if (router_args.rules->count || router_args.rule->count) {
+        output = calloc(1, router_args.rule->count ? 2048 : 4096);
+        if (!output) {
+            printf("Out of memory\n");
+            return 1;
+        }
+
+        if (router_args.rule->count) {
+            err = claw_event_router_get_rule_json(router_args.rule->sval[0], output, 2048);
+        } else {
+            err = claw_event_router_list_rules_json(output, 4096);
+        }
+        if (err != ESP_OK) {
+            printf("event_router rules failed: %s\n", esp_err_to_name(err));
+            free(output);
+            return 1;
+        }
+
+        printf("%s\n", output);
+        free(output);
+        return 0;
+    }
+
+    if (router_args.last->count) {
+        err = claw_event_router_get_last_result(&result);
+        if (err != ESP_OK) {
+            printf("event_router last failed: %s\n", esp_err_to_name(err));
+            return 1;
+        }
+
+        printf("matched=%s matched_rules=%d action_count=%d failed_actions=%d route=%d handled_at_ms=%" PRId64 "\n",
+               result.matched ? "true" : "false",
+               result.matched_rules,
+               result.action_count,
+               result.failed_actions,
+               (int)result.route,
+               result.handled_at_ms);
+        printf("first_rule_id=%s\n", result.first_rule_id[0] ? result.first_rule_id : "-");
+        printf("ack=%s\n", result.ack[0] ? result.ack : "-");
+        printf("last_error=%s\n", esp_err_to_name(result.last_error));
+        return 0;
+    }
+
+    if (router_args.emit_message->count) {
+        if (!router_args.source_cap->count || !router_args.channel->count ||
+                !router_args.chat_id->count || !router_args.text->count) {
+            printf("'--emit-message' requires '--source-cap', '--channel', '--chat-id', and '--text'\n");
+            return 1;
+        }
+
+        err = claw_event_router_publish_message(router_args.source_cap->sval[0],
+                                                router_args.channel->sval[0],
+                                                router_args.chat_id->sval[0],
+                                                router_args.text->sval[0],
+                                                "console",
+                                                "cli-msg");
+        if (err != ESP_OK) {
+            printf("event_router emit-message failed: %s\n", esp_err_to_name(err));
+            return 1;
+        }
+
+        printf("message event published via %s to %s:%s\n",
+               router_args.source_cap->sval[0],
+               router_args.channel->sval[0],
+               router_args.chat_id->sval[0]);
+        return 0;
+    }
+
+    if (!router_args.source_cap->count || !router_args.event_type->count ||
+            !router_args.event_key->count || !router_args.payload_json->count) {
+        printf("'--emit-trigger' requires '--source-cap', '--event-type', '--event-key', and '--payload-json'\n");
+        return 1;
+    }
+
+    {
+        cJSON *json = cJSON_Parse(router_args.payload_json->sval[0]);
+
+        if (!json || !cJSON_IsObject(json)) {
+            cJSON_Delete(json);
+            printf("'--payload-json' must be a JSON object\n");
+            return 1;
+        }
+        cJSON_Delete(json);
+    }
+
+    err = claw_event_router_publish_trigger(router_args.source_cap->sval[0],
+                                            router_args.event_type->sval[0],
+                                            router_args.event_key->sval[0],
+                                            router_args.payload_json->sval[0]);
+    if (err != ESP_OK) {
+        printf("event_router emit-trigger failed: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+
+    printf("trigger event published via %s type=%s key=%s\n",
+           router_args.source_cap->sval[0],
+           router_args.event_type->sval[0],
+           router_args.event_key->sval[0]);
+    return 0;
+}
+
+void register_claw_event_router(void)
+{
+    router_args.reload = arg_lit0(NULL, "reload", "Reload automation rules from disk");
+    router_args.rules = arg_lit0(NULL, "rules", "List all automation rules");
+    router_args.rule = arg_str0(NULL, "rule", "<id>", "Show one automation rule");
+    router_args.last = arg_lit0(NULL, "last", "Show the last event router result");
+    router_args.emit_message = arg_lit0(NULL, "emit-message", "Publish a message event");
+    router_args.emit_trigger = arg_lit0(NULL, "emit-trigger", "Publish a trigger event");
+    router_args.source_cap = arg_str0(NULL, "source-cap", "<cap>", "Source capability name");
+    router_args.channel = arg_str0(NULL, "channel", "<channel>", "Source channel name");
+    router_args.chat_id = arg_str0(NULL, "chat-id", "<chat_id>", "Chat id");
+    router_args.text = arg_str0(NULL, "text", "<text>", "Message text");
+    router_args.event_type = arg_str0(NULL, "event-type", "<type>", "Trigger event type");
+    router_args.event_key = arg_str0(NULL, "event-key", "<key>", "Trigger event key");
+    router_args.payload_json = arg_str0(NULL, "payload-json", "<json>", "Trigger payload JSON object");
+    router_args.end = arg_end(12);
+
+    const esp_console_cmd_t router_cmd = {
+        .command = "event_router",
+        .help = "Event router operations.\n"
+        "Examples:\n"
+        " event_router --rules\n"
+        " event_router --rule sample-id\n"
+        " event_router --reload\n"
+        " event_router --emit-message --source-cap qq_gateway --channel qq --chat-id 123 --text hello\n",
+        .func = event_router_func,
+        .argtable = &router_args,
+    };
+
+    ESP_ERROR_CHECK(esp_console_cmd_register(&router_cmd));
+}

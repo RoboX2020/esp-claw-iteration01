@@ -1,0 +1,97 @@
+[
+  {
+    "id": "im_hello_clawgent",
+    "description": "Intercept IM hello! clawgent and reply directly.",
+    "enabled": true,
+    "ack": "{{event.source_channel}} hello intercepted",
+    "match": {
+      "event_type": "message",
+      "event_key": "text",
+      "content_type": "text",
+      "text": "hello! clawgent"
+    },
+    "actions": [
+      {
+        "type": "send_message",
+        "input": {
+          "channel": "{{event.source_channel}}",
+          "chat_id": "{{event.chat_id}}",
+          "message": "Nice to meet you!"
+        }
+      }
+    ]
+  },
+  {
+    "id": "im_attachment_saved_reply",
+    "description": "Reply when an IM attachment is saved.",
+    "enabled": true,
+    "ack": "{{event.source_channel}} attachment saved",
+    "match": {
+      "event_type": "attachment_saved"
+    },
+    "actions": [
+      {
+        "type": "send_message",
+        "input": {
+          "channel": "{{event.source_channel}}",
+          "chat_id": "{{event.chat_id}}",
+          "message": "File received from {{event.source_channel}}"
+        }
+      }
+    ]
+  },
+  {
+    "id": "mcp_state_report_to_script",
+    "description": "Route MCP state reports into Lua for deterministic handling.",
+    "enabled": true,
+    "ack": "mcp state report scripted",
+    "match": {
+      "event_type": "mcp_device_state_report",
+      "source_cap": "mcp_server",
+      "source_channel": "mcp"
+    },
+    "actions": [
+      {
+        "type": "run_script",
+        "input": {
+          "path": "/fatfs/data/lua/hello.lua",
+          "async": false,
+          "event_type": "{{event.event_type}}",
+          "source_channel": "{{event.source_channel}}",
+          "text": "{{event.text}}",
+          "payload_json": "{{event.payload_json}}",
+          "chat_id": "{{event.chat_id}}"
+        }
+      }
+    ]
+  },
+  {
+    "id": "im_any_message_agent",
+    "description": "Route IM text messages to the agent.",
+    "enabled": true,
+    "consume_on_match": true,
+    "ack": "{{event.source_channel}} routed to agent",
+    "match": {
+      "event_type": "message",
+      "event_key": "text",
+      "content_type": "text"
+    },
+    "actions": [
+      {
+        "type": "run_agent",
+        "input": {
+          "target_channel": "{{event.source_channel}}",
+          "session_policy": "chat"
+        }
+      },
+      {
+        "type": "send_message",
+        "input": {
+          "channel": "{{event.source_channel}}",
+          "chat_id": "{{event.chat_id}}",
+          "message": "{{last.output}}"
+        }
+      }
+    ]
+  }
+]

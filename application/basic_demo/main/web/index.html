@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clawgent Settings</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <main class="shell">
+        <header class="hero">
+            <div>
+                <p class="eyebrow">ESP Clawgent</p>
+                <h1>Settings and file management</h1>
+                <p class="subtitle">A clean control surface for credentials, runtime settings, and FATFS storage on your ESP device.</p>
+            </div>
+            <div class="status-card">
+                <p class="status-label">Device status</p>
+                <p id="wifiStatus" class="status-value">Loading</p>
+                <p id="ipAddress" class="status-meta">IP: -</p>
+                <p id="storagePath" class="status-meta">Storage: -</p>
+            </div>
+        </header>
+
+        <section class="grid">
+            <section class="panel">
+                <div class="panel-head">
+                    <div>
+                        <p class="panel-kicker">Configuration</p>
+                        <h2>Credentials and runtime</h2>
+                    </div>
+                    <button id="saveConfigButton" class="primary">Save changes</button>
+                </div>
+                <p id="configMessage" class="banner hidden"></p>
+                <form id="configForm" class="form-grid">
+                    <label>
+                        <span>Wi‑Fi SSID</span>
+                        <input id="wifi_ssid" name="wifi_ssid" autocomplete="off">
+                    </label>
+                    <label>
+                        <span>Wi-Fi password</span>
+                        <input id="wifi_password" name="wifi_password" type="password">
+                    </label>
+                    <label>
+                        <span>LLM API Key</span>
+                        <input id="llm_api_key" name="llm_api_key" type="password">
+                    </label>
+                    <label>
+                        <span>LLM Backend</span>
+                        <input id="llm_backend_type" name="llm_backend_type" placeholder="openai_compatible / custom">
+                    </label>
+                    <label>
+                        <span>LLM Profile</span>
+                        <input id="llm_profile" name="llm_profile" placeholder="openai / qwen_compatible">
+                    </label>
+                    <label>
+                        <span>LLM Model</span>
+                        <input id="llm_model" name="llm_model">
+                    </label>
+                    <label>
+                        <span>LLM Base URL</span>
+                        <input id="llm_base_url" name="llm_base_url" placeholder="https://api.openai.com">
+                    </label>
+                    <label>
+                        <span>LLM Auth Type</span>
+                        <input id="llm_auth_type" name="llm_auth_type" placeholder="bearer / api-key / none">
+                    </label>
+                    <label>
+                        <span>LLM Timeout (ms)</span>
+                        <input id="llm_timeout_ms" name="llm_timeout_ms" placeholder="120000">
+                    </label>
+                    <label>
+                        <span>QQ App ID</span>
+                        <input id="qq_app_id" name="qq_app_id">
+                    </label>
+                    <label>
+                        <span>QQ App Secret</span>
+                        <input id="qq_app_secret" name="qq_app_secret" type="password">
+                    </label>
+                    <label>
+                        <span>Telegram Bot Token</span>
+                        <input id="tg_bot_token" name="tg_bot_token" type="password">
+                    </label>
+                    <label>
+                        <span>WeChat Token</span>
+                        <input id="wechat_token" name="wechat_token" type="password">
+                    </label>
+                    <label>
+                        <span>WeChat Base URL</span>
+                        <input id="wechat_base_url" name="wechat_base_url" placeholder="https://ilinkai.weixin.qq.com">
+                    </label>
+                    <label>
+                        <span>WeChat CDN Base URL</span>
+                        <input id="wechat_cdn_base_url" name="wechat_cdn_base_url" placeholder="https://novac2c.cdn.weixin.qq.com/c2c">
+                    </label>
+                    <label>
+                        <span>WeChat Account ID</span>
+                        <input id="wechat_account_id" name="wechat_account_id" placeholder="default">
+                    </label>
+                    <div class="panel" style="grid-column: 1 / -1;">
+                        <div class="panel-head">
+                            <div>
+                                <p class="panel-kicker">WeChat Login</p>
+                                <h2>QR code sign-in</h2>
+                            </div>
+                            <div class="toolbar">
+                                <button id="wechatLoginStartButton" class="ghost" type="button">Generate QR</button>
+                                <button id="wechatLoginCancelButton" class="ghost" type="button">Cancel</button>
+                            </div>
+                        </div>
+                        <p id="wechatLoginMessage" class="banner hidden"></p>
+                        <p id="wechatLoginMeta" class="status-meta">Status: idle</p>
+                        <img id="wechatLoginQr" class="hidden" alt="WeChat QR code" style="max-width: 240px; width: 100%; border-radius: 12px; border: 1px solid rgba(0,0,0,0.08);">
+                        <p><a id="wechatLoginQrLink" class="hidden" target="_blank" rel="noopener noreferrer">Open login link</a></p>
+                        <p class="note">Generate a QR code here to obtain `wechat_token` automatically. The token is saved to NVS after confirmation. Restart the device to apply the new login.</p>
+                    </div>
+                    <label>
+                        <span>Brave Search Key</span>
+                        <input id="search_brave_key" name="search_brave_key" type="password">
+                    </label>
+                    <label>
+                        <span>Tavily Key</span>
+                        <input id="search_tavily_key" name="search_tavily_key" type="password">
+                    </label>
+                    <label>
+                        <span>Lua base directory</span>
+                        <input id="lua_base_dir" name="lua_base_dir">
+                    </label>
+                    <label>
+                        <span>Timezone</span>
+                        <input id="time_timezone" name="time_timezone" placeholder="UTC0">
+                    </label>
+                </form>
+                <p class="note">Changes are stored in NVS. Restart the device after updating Wi-Fi or core LLM settings.</p>
+            </section>
+
+            <section class="panel">
+                <div class="panel-head">
+                    <div>
+                        <p class="panel-kicker">Files</p>
+                        <h2>FATFS file manager</h2>
+                    </div>
+                    <button id="refreshFilesButton" class="ghost">Refresh</button>
+                </div>
+                <p id="fileMessage" class="banner hidden"></p>
+                <div class="toolbar">
+                    <button id="upDirButton" class="ghost">Up one level</button>
+                    <code id="currentPath">/</code>
+                </div>
+                <div class="toolbar">
+                    <input id="newFolderInput" placeholder="New folder name">
+                    <button id="createFolderButton" class="ghost">Create folder</button>
+                </div>
+                <div class="toolbar upload-row">
+                    <input id="uploadPathInput" placeholder="/example.txt">
+                    <div class="file-picker">
+                        <input id="uploadFileInput" type="file">
+                        <button id="chooseFileButton" class="ghost" type="button">Choose file</button>
+                        <span id="selectedFileName" class="file-name">No file selected</span>
+                    </div>
+                    <button id="uploadButton" class="primary">Upload file</button>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Type</th>
+                                <th>Size</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fileTableBody"></tbody>
+                    </table>
+                </div>
+            </section>
+        </section>
+    </main>
+
+    <script src="/app.js"></script>
+</body>
+</html>

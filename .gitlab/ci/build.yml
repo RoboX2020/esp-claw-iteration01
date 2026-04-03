@@ -44,7 +44,7 @@
   script:
     - pip install idf_build_apps
     - |
-      python build_apps.py ${EXAMPLE_DIR} \
+      python .gitlab/ci/build_apps.py ${EXAMPLE_DIR} \
               --config ${EXAMPLE_CONFIG} \
               -t all \
               -r ${BUILD_RECURSIVE} \
@@ -77,10 +77,10 @@
       - IMAGE: espressif/idf:release-v5.5
       - IMAGE: espressif/idf:release-v6.0
 
-build_example_ai_esp_dl_human_activity_recognition:
+build_application_basic_demo:
   extends:
     - .build_examples_template
-    - .rules:build:example_ai_esp_dl_human_activity_recognition
+    - .rules:build:application_basic_demo
     - .build_idf_active_release_version
   variables:
-    EXAMPLE_DIR: examples/ai/esp_dl/human_activity_recognition
+    EXAMPLE_DIR: application/basic_demo
