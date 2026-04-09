@@ -402,8 +402,6 @@ static esp_err_t cap_scheduler_build_payload_json(const cap_scheduler_entry_t *e
                             entry->item.kind == CAP_SCHEDULER_ITEM_ONCE ? "once" :
                             entry->item.kind == CAP_SCHEDULER_ITEM_INTERVAL ? "interval" : "cron");
     cJSON_AddNumberToObject(root, "run_count", entry->run_count + 1);
-    cJSON_AddStringToObject(root, "catch_up",
-                            entry->item.catch_up_policy == CAP_SCHEDULER_CATCH_UP_FIRE_ONCE ? "fire_once" : "skip");
 
     user_payload = cJSON_Parse(entry->item.payload_json[0] ? entry->item.payload_json : "{}");
     if (!user_payload) {
@@ -538,8 +536,7 @@ static esp_err_t cap_scheduler_fire_due_entries(void)
         if (entry->next_fire_ms <= 0 || entry->next_fire_ms > now_ms) {
             continue;
         }
-        if (entry->item.catch_up_policy == CAP_SCHEDULER_CATCH_UP_SKIP &&
-                now_ms > entry->next_fire_ms + (int64_t)s_cap_scheduler.config.tick_ms) {
+        if (now_ms > entry->next_fire_ms + (int64_t)s_cap_scheduler.config.tick_ms) {
             entry->missed_count++;
             runtime_state_changed = true;
             if (cap_scheduler_refresh_entry_locked(entry, now_ms) != ESP_OK) {

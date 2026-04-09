@@ -640,19 +640,6 @@ static bool cap_scheduler_status_from_string(const char *value, cap_scheduler_st
     return false;
 }
 
-static const char *cap_scheduler_catch_up_to_string(cap_scheduler_catch_up_policy_t policy)
-{
-    return policy == CAP_SCHEDULER_CATCH_UP_FIRE_ONCE ? "fire_once" : "skip";
-}
-
-static cap_scheduler_catch_up_policy_t cap_scheduler_catch_up_from_string(const char *value)
-{
-    if (value && strcmp(value, "fire_once") == 0) {
-        return CAP_SCHEDULER_CATCH_UP_FIRE_ONCE;
-    }
-    return CAP_SCHEDULER_CATCH_UP_SKIP;
-}
-
 static void cap_scheduler_parse_item_json(const cJSON *node,
                                           cap_scheduler_item_t *item,
                                           const char *default_timezone)
@@ -661,7 +648,6 @@ static void cap_scheduler_parse_item_json(const cJSON *node,
 
     memset(item, 0, sizeof(*item));
     item->enabled = true;
-    item->catch_up_policy = CAP_SCHEDULER_CATCH_UP_SKIP;
 
     value = cJSON_GetObjectItemCaseSensitive(node, "id");
     if (cJSON_IsString(value)) {
@@ -734,10 +720,6 @@ static void cap_scheduler_parse_item_json(const cJSON *node,
             free(rendered);
         }
     }
-    value = cJSON_GetObjectItemCaseSensitive(node, "catch_up_policy");
-    if (cJSON_IsString(value)) {
-        item->catch_up_policy = cap_scheduler_catch_up_from_string(value->valuestring);
-    }
     value = cJSON_GetObjectItemCaseSensitive(node, "max_runs");
     if (cJSON_IsNumber(value)) {
         item->max_runs = value->valueint;
@@ -786,7 +768,6 @@ esp_err_t cap_scheduler_entry_to_json(const cap_scheduler_entry_t *entry,
         cJSON_AddStringToObject(root, "session_policy", entry->item.session_policy);
         cJSON_AddStringToObject(root, "text", entry->item.text);
         cJSON_AddStringToObject(root, "payload_json", entry->item.payload_json);
-        cJSON_AddStringToObject(root, "catch_up_policy", cap_scheduler_catch_up_to_string(entry->item.catch_up_policy));
         cJSON_AddNumberToObject(root, "max_runs", entry->item.max_runs);
     }
 

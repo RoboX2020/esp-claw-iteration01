@@ -18,7 +18,7 @@
 #include "cap_im_tg.h"
 #include "cap_im_wechat.h"
 #include "cap_llm_inspect.h"
-// #include "cap_lua.h"
+#include "cap_lua.h"
 #include "cap_mcp_client.h"
 #include "cap_mcp_server.h"
 #include "cap_scheduler.h"
@@ -169,20 +169,20 @@ static esp_err_t init_capabilities(const basic_demo_settings_t *settings)
     }),
     TAG,
     "Failed to whitelist llm_inspect");
-    // ESP_RETURN_ON_ERROR(cap_cli_register_command(&(cap_cli_command_t) {
-    //     .command_name = "mcp_client",
-    //     .description = "Run MCP discovery and remote tool calls",
-    //     .usage_hint = "mcp_client --discover",
-    // }),
-    // TAG,
-    // "Failed to whitelist mcp_client");
-    // ESP_RETURN_ON_ERROR(cap_cli_register_command(&(cap_cli_command_t) {
-    //     .command_name = "mcp_server",
-    //     .description = "Manage local MCP server lifecycle and config",
-    //     .usage_hint = "mcp_server --status",
-    // }),
-    // TAG,
-    // "Failed to whitelist mcp_server");
+    ESP_RETURN_ON_ERROR(cap_cli_register_command(&(cap_cli_command_t) {
+        .command_name = "mcp_client",
+        .description = "Run MCP discovery and remote tool calls",
+        .usage_hint = "mcp_client --discover",
+    }),
+    TAG,
+    "Failed to whitelist mcp_client");
+    ESP_RETURN_ON_ERROR(cap_cli_register_command(&(cap_cli_command_t) {
+        .command_name = "mcp_server",
+        .description = "Manage local MCP server lifecycle and config",
+        .usage_hint = "mcp_server --status",
+    }),
+    TAG,
+    "Failed to whitelist mcp_server");
     ESP_RETURN_ON_ERROR(cap_cli_register_command(&(cap_cli_command_t) {
         .command_name = "skill",
         .description = "Manage active skills for one session",
@@ -224,9 +224,9 @@ static esp_err_t init_capabilities(const basic_demo_settings_t *settings)
     ESP_RETURN_ON_ERROR(cap_files_set_base_dir(BASIC_DEMO_FATFS_BASE_PATH),
                         TAG,
                         "Failed to set files cap base dir");
-    // ESP_RETURN_ON_ERROR(cap_lua_set_base_dir(BASIC_DEMO_LUA_ROOT_DIR),
-    //                     TAG,
-    //                     "Failed to set Lua base dir");
+    ESP_RETURN_ON_ERROR(cap_lua_set_base_dir(BASIC_DEMO_LUA_ROOT_DIR),
+                        TAG,
+                        "Failed to set Lua base dir");
     ESP_RETURN_ON_ERROR(cap_im_qq_set_attachment_config(
     &(cap_im_qq_attachment_config_t) {
         .storage_root_dir = BASIC_DEMO_IM_ATTACHMENT_ROOT,

@@ -44,11 +44,6 @@ typedef enum {
     CAP_SCHEDULER_STATUS_DISABLED = 5,
 } cap_scheduler_status_t;
 
-typedef enum {
-    CAP_SCHEDULER_CATCH_UP_SKIP = 0,
-    CAP_SCHEDULER_CATCH_UP_FIRE_ONCE = 1,
-} cap_scheduler_catch_up_policy_t;
-
 typedef struct {
     char id[CAP_SCHEDULER_ID_LEN];
     bool enabled;
@@ -66,7 +61,6 @@ typedef struct {
     char session_policy[CAP_SCHEDULER_SESSION_POLICY_LEN];
     char text[CAP_SCHEDULER_TEXT_LEN];
     char payload_json[CAP_SCHEDULER_PAYLOAD_LEN];
-    cap_scheduler_catch_up_policy_t catch_up_policy;
     int max_runs;
 } cap_scheduler_item_t;
 
