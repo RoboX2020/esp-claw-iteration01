@@ -1,0 +1,10 @@
+{
+  "skills": [
+    {
+      "id": "cap_lua_skills",
+      "file": "cap_lua_skills.md",
+      "title": "cap_lua_skills",
+      "summary": "This Files describes how to correctly use Lua scripts."
+    }
+  ]
+}

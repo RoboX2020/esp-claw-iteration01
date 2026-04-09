@@ -29,6 +29,12 @@
       "file": "im_send_picture.md",
       "title": "IM Send Picture",
       "summary": "Send an existing local image to a Telegram or QQ chat."
+    },
+    {
+      "id": "cap_lua_skills",
+      "file": "cap_lua_skills.md",
+      "title": "cap_lua_skills",
+      "summary": "This Files describes how to correctly use Lua scripts."
     }
   ]
 }
