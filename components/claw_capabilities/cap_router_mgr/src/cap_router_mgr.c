@@ -13,6 +13,7 @@
 #include "cJSON.h"
 #include "claw_cap.h"
 #include "claw_event_router.h"
+#include "esp_err.h"
 
 static const char *CAP_ROUTER_MGR_ADD = "add_router_rule";
 static const char *CAP_ROUTER_MGR_UPDATE = "update_router_rule";
@@ -22,7 +23,8 @@ static const char *CAP_ROUTER_MGR_RELOAD = "reload_router_rules";
 static void cap_router_mgr_write_error(char *output,
                                        size_t output_size,
                                        const char *error,
-                                       const char *id)
+                                       const char *id,
+                                       esp_err_t err)
 {
     cJSON *root = NULL;
     char *rendered = NULL;
@@ -35,13 +37,15 @@ static void cap_router_mgr_write_error(char *output,
     if (!root) {
         snprintf(output,
                  output_size,
-                 "{\"ok\":false,\"error\":\"%s\"}",
-                 error ? error : "unknown error");
+                 "{\"ok\":false,\"error\":\"%s\",\"code\":\"%s\"}",
+                 error ? error : "unknown error",
+                 esp_err_to_name(err));
         return;
     }
 
     cJSON_AddBoolToObject(root, "ok", false);
     cJSON_AddStringToObject(root, "error", error ? error : "unknown error");
+    cJSON_AddStringToObject(root, "code", esp_err_to_name(err));
     if (id && id[0]) {
         cJSON_AddStringToObject(root, "id", id);
     }
@@ -53,10 +57,43 @@ static void cap_router_mgr_write_error(char *output,
     } else {
         snprintf(output,
                  output_size,
-                 "{\"ok\":false,\"error\":\"%s\"}",
-                 error ? error : "unknown error");
+                 "{\"ok\":false,\"error\":\"%s\",\"code\":\"%s\"}",
+                 error ? error : "unknown error",
+                 esp_err_to_name(err));
     }
     cJSON_Delete(root);
+}
+
+static const char *cap_router_mgr_apply_error_reason(const char *action, esp_err_t err)
+{
+    if (!action) {
+        return "failed to apply router rule";
+    }
+
+    if (strcmp(action, CAP_ROUTER_MGR_ADD) == 0) {
+        if (err == ESP_ERR_INVALID_STATE) {
+            return "rule id already exists; use update_router_rule";
+        }
+        if (err == ESP_ERR_INVALID_SIZE) {
+            return "router rule limit reached";
+        }
+        if (err == ESP_ERR_INVALID_ARG) {
+            return "invalid rule_json structure";
+        }
+        return "failed to add router rule";
+    }
+
+    if (strcmp(action, CAP_ROUTER_MGR_UPDATE) == 0) {
+        if (err == ESP_ERR_NOT_FOUND) {
+            return "rule id not found; use add_router_rule";
+        }
+        if (err == ESP_ERR_INVALID_ARG) {
+            return "invalid rule_json structure";
+        }
+        return "failed to update router rule";
+    }
+
+    return "failed to apply router rule";
 }
 
 static esp_err_t cap_router_mgr_write_action_result(const char *action,
@@ -179,14 +216,14 @@ static esp_err_t cap_router_mgr_get_execute(const char *input_json,
 
     err = cap_router_mgr_parse_input(input_json, &root);
     if (err != ESP_OK) {
-        cap_router_mgr_write_error(output, output_size, "invalid input json", NULL);
+        cap_router_mgr_write_error(output, output_size, "invalid input json", NULL, err);
         return err;
     }
 
     err = cap_router_mgr_extract_id(root, &id);
     if (err != ESP_OK) {
         cJSON_Delete(root);
-        cap_router_mgr_write_error(output, output_size, "id is required", NULL);
+        cap_router_mgr_write_error(output, output_size, "id is required", NULL, err);
         return err;
     }
     strlcpy(id_buf, id, sizeof(id_buf));
@@ -194,7 +231,12 @@ static esp_err_t cap_router_mgr_get_execute(const char *input_json,
 
     err = claw_event_router_get_rule_json(id_buf, output, output_size);
     if (err != ESP_OK) {
-        cap_router_mgr_write_error(output, output_size, "failed to get router rule", id_buf);
+        cap_router_mgr_write_error(output,
+                                   output_size,
+                                   err == ESP_ERR_NOT_FOUND ? "router rule id not found" :
+                                   "failed to get router rule",
+                                   id_buf,
+                                   err);
     }
     return err;
 }
@@ -213,20 +255,24 @@ static esp_err_t cap_router_mgr_apply_rule_json(const char *input_json,
 
     err = cap_router_mgr_parse_input(input_json, &root);
     if (err != ESP_OK) {
-        cap_router_mgr_write_error(output, output_size, "invalid input json", NULL);
+        cap_router_mgr_write_error(output, output_size, "invalid input json", NULL, err);
         return err;
     }
 
     rule_json = cJSON_GetStringValue(cJSON_GetObjectItem(root, "rule_json"));
     if (!rule_json || !rule_json[0]) {
         cJSON_Delete(root);
-        cap_router_mgr_write_error(output, output_size, "rule_json is required", NULL);
+        cap_router_mgr_write_error(output,
+                                   output_size,
+                                   "rule_json is required",
+                                   NULL,
+                                   ESP_ERR_INVALID_ARG);
         return ESP_ERR_INVALID_ARG;
     }
     rule_json_dup = strdup(rule_json);
     if (!rule_json_dup) {
         cJSON_Delete(root);
-        cap_router_mgr_write_error(output, output_size, "out of memory", NULL);
+        cap_router_mgr_write_error(output, output_size, "out of memory", NULL, ESP_ERR_NO_MEM);
         return ESP_ERR_NO_MEM;
     }
     (void)cap_router_mgr_extract_rule_json_id(rule_json_dup, id, sizeof(id));
@@ -235,7 +281,11 @@ static esp_err_t cap_router_mgr_apply_rule_json(const char *input_json,
     err = fn(rule_json_dup);
     free(rule_json_dup);
     if (err != ESP_OK) {
-        cap_router_mgr_write_error(output, output_size, "failed to apply router rule", id);
+        cap_router_mgr_write_error(output,
+                                   output_size,
+                                   cap_router_mgr_apply_error_reason(action, err),
+                                   id,
+                                   err);
         return err;
     }
 
@@ -282,14 +332,14 @@ static esp_err_t cap_router_mgr_delete_execute(const char *input_json,
 
     err = cap_router_mgr_parse_input(input_json, &root);
     if (err != ESP_OK) {
-        cap_router_mgr_write_error(output, output_size, "invalid input json", NULL);
+        cap_router_mgr_write_error(output, output_size, "invalid input json", NULL, err);
         return err;
     }
 
     err = cap_router_mgr_extract_id(root, &id);
     if (err != ESP_OK) {
         cJSON_Delete(root);
-        cap_router_mgr_write_error(output, output_size, "id is required", NULL);
+        cap_router_mgr_write_error(output, output_size, "id is required", NULL, err);
         return err;
     }
     strlcpy(id_buf, id, sizeof(id_buf));
@@ -297,7 +347,12 @@ static esp_err_t cap_router_mgr_delete_execute(const char *input_json,
 
     err = claw_event_router_delete_rule(id_buf);
     if (err != ESP_OK) {
-        cap_router_mgr_write_error(output, output_size, "failed to delete router rule", id_buf);
+        cap_router_mgr_write_error(output,
+                                   output_size,
+                                   err == ESP_ERR_NOT_FOUND ? "router rule id not found" :
+                                   "failed to delete router rule",
+                                   id_buf,
+                                   err);
         return err;
     }
 
@@ -316,7 +371,7 @@ static esp_err_t cap_router_mgr_reload_execute(const char *input_json,
 
     err = claw_event_router_reload();
     if (err != ESP_OK) {
-        cap_router_mgr_write_error(output, output_size, "failed to reload router rules", NULL);
+        cap_router_mgr_write_error(output, output_size, "failed to reload router rules", NULL, err);
         return err;
     }
 

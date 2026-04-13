@@ -79,11 +79,10 @@ static const claw_cap_descriptor_t s_scheduler_descriptors[] = {
         .id = "scheduler_add",
         .name = "scheduler_add",
         .family = "scheduler",
-        .description = "Add one scheduler entry from JSON definition and return runtime state.",
+        .description = "Add one scheduler entry from schedule_json string and return runtime state.",
         .kind = CLAW_CAP_KIND_HYBRID,
         .cap_flags = CLAW_CAP_FLAG_CALLABLE_BY_LLM,
-        .input_schema_json =
-        "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"},\"enabled\":{\"type\":\"boolean\"},\"kind\":{\"type\":\"string\",\"enum\":[\"once\",\"interval\",\"cron\"]},\"timezone\":{\"type\":\"string\"},\"start_at_ms\":{\"type\":\"integer\"},\"end_at_ms\":{\"type\":\"integer\"},\"interval_ms\":{\"type\":\"integer\"},\"cron_expr\":{\"type\":\"string\"},\"event_type\":{\"type\":\"string\"},\"event_key\":{\"type\":\"string\"},\"source_channel\":{\"type\":\"string\"},\"chat_id\":{\"type\":\"string\"},\"content_type\":{\"type\":\"string\"},\"session_policy\":{\"type\":\"string\"},\"text\":{\"type\":\"string\"},\"payload_json\":{\"type\":\"string\"},\"max_runs\":{\"type\":\"integer\"}},\"required\":[\"id\",\"kind\"]}",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"schedule_json\":{\"type\":\"string\"}},\"required\":[\"schedule_json\"]}",
         .execute = cap_scheduler_execute_add,
     },
     {
@@ -686,6 +685,34 @@ static esp_err_t cap_scheduler_parse_id_input(const char *input_json, char *id, 
     return ESP_OK;
 }
 
+static esp_err_t cap_scheduler_parse_add_input(const char *input_json,
+                                               cap_scheduler_item_t *item,
+                                               const char *default_timezone)
+{
+    cJSON *root = NULL;
+    const char *schedule_json = NULL;
+    esp_err_t err;
+
+    if (!item) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    root = cJSON_Parse(input_json ? input_json : "{}");
+    if (!cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        return ESP_ERR_INVALID_ARG;
+    }
+    schedule_json = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "schedule_json"));
+    if (!schedule_json || !schedule_json[0]) {
+        cJSON_Delete(root);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    err = cap_scheduler_parse_item_json_string(schedule_json, item, default_timezone);
+    cJSON_Delete(root);
+    return err;
+}
+
 static esp_err_t cap_scheduler_write_snapshot_json(const cap_scheduler_snapshot_t *snapshot,
                                                    char *output,
                                                    size_t output_size)
@@ -1221,18 +1248,20 @@ static esp_err_t cap_scheduler_execute_add(const char *input_json,
 {
     cap_scheduler_item_t item = {0};
     const char *default_timezone = NULL;
+    esp_err_t err;
 
     (void)ctx;
 
     default_timezone = s_cap_scheduler.default_timezone[0] ?
                        s_cap_scheduler.default_timezone : CAP_SCHEDULER_DEFAULT_TIMEZONE;
-    ESP_RETURN_ON_ERROR(cap_scheduler_parse_item_json_string(input_json ? input_json : "{}",
-                                                             &item,
-                                                             default_timezone),
+    ESP_RETURN_ON_ERROR(cap_scheduler_parse_add_input(input_json,
+                                                      &item,
+                                                      default_timezone),
                         TAG,
                         "scheduler add input invalid");
     ESP_RETURN_ON_ERROR(cap_scheduler_add(&item), TAG, "scheduler add failed");
-    return cap_scheduler_get_state_json(item.id, output, output_size);
+    err = cap_scheduler_get_state_json(item.id, output, output_size);
+    return err;
 }
 
 static esp_err_t cap_scheduler_execute_enable(const char *input_json,
