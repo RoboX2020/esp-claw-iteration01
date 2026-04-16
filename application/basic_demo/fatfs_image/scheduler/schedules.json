@@ -1,7 +1,7 @@
 [
   {
     "id": "demo_interval_1m",
-    "enabled": true,
+    "enabled": false,
     "kind": "interval",
     "interval_ms": 60000,
     "event_type": "schedule",
