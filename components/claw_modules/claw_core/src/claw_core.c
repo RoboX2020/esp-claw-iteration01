@@ -189,7 +189,7 @@ static void log_tool_call_names(uint32_t request_id, const claw_core_llm_respons
         off += (size_t)written;
     }
 
-    ESP_LOGI(TAG, "llm_tool_calls request=%" PRIu32 " count=%u names=%s%s",
+    ESP_LOGD(TAG, "llm_tool_calls request=%" PRIu32 " count=%u names=%s%s",
              request_id,
              (unsigned)response->tool_call_count,
              buf,
@@ -443,6 +443,90 @@ static void publish_response_event_if_requested(const claw_core_request_item_t *
     free(payload_json);
 }
 
+static void publish_stage_event(const claw_core_request_t *request, const char *text)
+{
+    claw_event_t event = {0};
+    const char *channel;
+    const char *chat_id;
+    int64_t now_ms;
+
+    if (!request || !text || !text[0]) {
+        return;
+    }
+    channel = (request->target_channel && request->target_channel[0]) ?
+              request->target_channel : request->source_channel;
+    chat_id = (request->target_chat_id && request->target_chat_id[0]) ?
+              request->target_chat_id : request->source_chat_id;
+    if (!channel || !channel[0] || !chat_id || !chat_id[0]) {
+        return;
+    }
+
+    now_ms = claw_core_now_ms();
+    snprintf(event.event_id, sizeof(event.event_id),
+             "stage-%" PRIu32 "-%" PRId64, request->request_id, now_ms);
+    strlcpy(event.source_cap, "claw_core", sizeof(event.source_cap));
+    strlcpy(event.event_type, "agent_stage", sizeof(event.event_type));
+    strlcpy(event.source_channel, channel, sizeof(event.source_channel));
+    strlcpy(event.chat_id, chat_id, sizeof(event.chat_id));
+    strlcpy(event.content_type, "text", sizeof(event.content_type));
+    event.text = (char *)text;
+    event.timestamp_ms = now_ms;
+    esp_err_t pub_err = claw_event_router_publish(&event);
+    if (pub_err != ESP_OK) {
+        ESP_LOGW(TAG, "request=%" PRIu32 " failed to publish stage event: %s",
+                 request->request_id, esp_err_to_name(pub_err));
+    }
+}
+
+static void publish_stage_tool_calls(const claw_core_request_t *request,
+                                     const claw_core_llm_response_t *response,
+                                     uint32_t iteration)
+{
+#if CONFIG_CLAW_CORE_STAGE_VERBOSITY_VERBOSE
+    char buf[256];
+    size_t off = 0;
+    size_t i;
+    int written;
+
+    if (!response || response->tool_call_count == 0) {
+        return;
+    }
+
+    if (iteration > 0) {
+        written = snprintf(buf, sizeof(buf), "🦞 [Round %" PRIu32 "] Snap: ", iteration + 1);
+    } else {
+        written = snprintf(buf, sizeof(buf), "🦞 Snap: ");
+    }
+    if (written < 0 || (size_t)written >= sizeof(buf)) {
+        return;
+    }
+    off = (size_t)written;
+
+    for (i = 0; i < response->tool_call_count; i++) {
+        const char *name = response->tool_calls[i].name ? response->tool_calls[i].name : "?";
+        const char *args = response->tool_calls[i].arguments_json;
+        if (args && args[0]) {
+            written = snprintf(buf + off, sizeof(buf) - off, "%s%s(%.40s%s)",
+                               i == 0 ? "" : ", ", name, args,
+                               strlen(args) > 40 ? "..." : "");
+        } else {
+            written = snprintf(buf + off, sizeof(buf) - off, "%s%s",
+                               i == 0 ? "" : ", ", name);
+        }
+        if (written < 0 || (size_t)written >= sizeof(buf) - off) {
+            break;
+        }
+        off += (size_t)written;
+    }
+
+    publish_stage_event(request, buf);
+#else
+    (void)request;
+    (void)response;
+    (void)iteration;
+#endif
+}
+
 static esp_err_t append_user_message(cJSON *messages, const char *text)
 {
     cJSON *user_msg = NULL;
@@ -549,7 +633,11 @@ static char *build_current_turn_prompt(const claw_core_request_t *request)
         return NULL;
     }
 
-    total_len = 256;
+    static const char *k_behavior_note =
+        "The agent result will be automatically sent to the user. "
+        "so it is generally not need to activate cap_im_xx to return messages.\n";
+
+    total_len = 256 + strlen(k_behavior_note);
     total_len += request->source_cap ? strlen(request->source_cap) : 0;
     total_len += request->source_channel ? strlen(request->source_channel) : 0;
     total_len += request->source_chat_id ? strlen(request->source_chat_id) : 0;
@@ -569,13 +657,16 @@ static char *build_current_turn_prompt(const claw_core_request_t *request)
              "- source_channel: %s\n"
              "- source_chat_id: %s\n"
              "- source_sender_id: %s\n"
-             "- source_message_id: %s\n",
+             "- source_message_id: %s\n"
+             "\n## Behavior Notes\n"
+             "%s",
              request->request_id,
              request->source_cap ? request->source_cap : "(unknown)",
              request->source_channel ? request->source_channel : "(unknown)",
              request->source_chat_id ? request->source_chat_id : "(unknown)",
              request->source_sender_id ? request->source_sender_id : "(unknown)",
-             request->source_message_id ? request->source_message_id : "(none)");
+             request->source_message_id ? request->source_message_id : "(none)",
+             k_behavior_note);
     return text;
 }
 
@@ -787,15 +878,26 @@ static esp_err_t build_iteration_context(const claw_core_request_item_t *request
             continue;
         }
         if (err != ESP_OK) {
+            ESP_LOGW(TAG,
+                     "context provider collect failed request=%" PRIu32
+                     " provider=%s err=%s",
+                     request->view.request_id,
+                     provider->name,
+                     esp_err_to_name(err));
             goto cleanup;
         }
         if (!context.content || !context.content[0]) {
+            ESP_LOGW(TAG,
+                     "context provider returned empty content request=%" PRIu32
+                     " provider=%s",
+                     request->view.request_id,
+                     provider->name);
             free(context.content);
             err = ESP_FAIL;
             goto cleanup;
         }
         context_len = strlen(context.content);
-        ESP_LOGI(TAG,
+        ESP_LOGD(TAG,
                  "context_loaded request=%" PRIu32 " provider=%s context_kind=%s context_len=%u",
                  request->view.request_id,
                  provider->name,
@@ -934,9 +1036,6 @@ static void claw_core_task(void *arg)
                                               &llm_response,
                                               &response.view.error_message);
             if (err != ESP_OK) {
-                ESP_LOGE(TAG, "request=%"PRIu32" LLM chat failed: %s",
-                         request.view.request_id,
-                         response.view.error_message ? response.view.error_message : esp_err_to_name(err));
                 goto finish_request;
             }
 
@@ -949,6 +1048,7 @@ static void claw_core_task(void *arg)
             }
 
             log_tool_call_names(request.view.request_id, &llm_response);
+            publish_stage_tool_calls(&request.view, &llm_response, iteration);
 
             err = append_assistant_tool_calls(runtime_messages, &llm_response);
             if (err != ESP_OK) {
@@ -999,6 +1099,11 @@ static void claw_core_task(void *arg)
         }
 
 finish_request:
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "request=%" PRIu32 " failed: %s",
+                     request.view.request_id,
+                     response.view.error_message ? response.view.error_message : esp_err_to_name(err));
+        }
         publish_response_event_if_requested(&request, &response);
         if (request.view.flags & CLAW_CORE_REQUEST_FLAG_SKIP_RESPONSE_QUEUE) {
             free_response_item(&response);

@@ -66,7 +66,7 @@
         "input": {
           "channel": "{{event.source_channel}}",
           "chat_id": "{{event.chat_id}}",
-          "message": "ESP-Claw is working"
+          "message": "🦞 ESP-Claw is snapping on it..."
         }
       }
     ]
@@ -107,6 +107,27 @@
         "input": {
           "target_channel": "{{event.source_channel}}",
           "session_policy": "chat"
+        }
+      }
+    ]
+  },
+  {
+    "id": "agent_stage_im_notify",
+    "description": "Forward agent stage updates to the originating IM chat.",
+    "enabled": true,
+    "consume_on_match": true,
+    "ack": "agent stage notified via {{event.source_channel}}",
+    "match": {
+      "source_cap": "claw_core",
+      "event_type": "agent_stage"
+    },
+    "actions": [
+      {
+        "type": "send_message",
+        "input": {
+          "channel": "{{event.source_channel}}",
+          "chat_id": "{{event.chat_id}}",
+          "message": "{{event.text}}"
         }
       }
     ]

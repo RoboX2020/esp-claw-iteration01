@@ -1501,7 +1501,7 @@ static esp_err_t claw_event_router_execute_send_message_action(
     channel = cJSON_GetStringValue(cJSON_GetObjectItem(rendered_input, "channel"));
     chat_id = cJSON_GetStringValue(cJSON_GetObjectItem(rendered_input, "chat_id"));
     message = cJSON_GetStringValue(cJSON_GetObjectItem(rendered_input, "message"));
-    ESP_LOGI(TAG,
+    ESP_LOGD(TAG,
              "send_message rendered channel=%s chat_id=%s message_len=%u",
              channel ? channel : "(null)",
              chat_id ? chat_id : "(null)",
@@ -1514,11 +1514,16 @@ static esp_err_t claw_event_router_execute_send_message_action(
     }
     if (!message || !message[0]) {
         message = claw_event_router_get_ctx_string(ctx, "last", "output");
-        ESP_LOGI(TAG,
+        ESP_LOGD(TAG,
                  "send_message fallback last.output message_len=%u",
                  (unsigned int)(message ? strlen(message) : 0));
     }
     if (!message || !message[0]) {
+        ESP_LOGW(TAG,
+                 "send_message dropped: empty message rule=%s channel=%s chat_id=%s",
+                 rule ? rule->id : "-",
+                 channel ? channel : "(null)",
+                 chat_id ? chat_id : "(null)");
         cJSON_Delete(rendered_input);
         return ESP_ERR_INVALID_ARG;
     }
@@ -1537,7 +1542,7 @@ static esp_err_t claw_event_router_execute_send_message_action(
         cJSON_Delete(rendered_input);
         return err;
     }
-    ESP_LOGI(TAG, "send_message resolved cap=%s", cap_name);
+    ESP_LOGD(TAG, "send_message resolved cap=%s", cap_name);
 
     payload_root = cJSON_CreateObject();
     if (!payload_root) {
@@ -1679,7 +1684,7 @@ static esp_err_t claw_event_router_execute_action(const claw_event_router_rule_t
                                                   cJSON *ctx,
                                                   claw_event_router_result_t *result)
 {
-    ESP_LOGI(TAG,
+    ESP_LOGD(TAG,
              "event=%s rule=%s action=%s start",
              event ? event->event_id : "-",
              rule ? rule->id : "-",
@@ -1827,12 +1832,13 @@ static esp_err_t claw_event_router_process_event(const claw_event_t *event,
 
         for (size_t j = 0; j < rule->action_count; j++) {
             rule_err = claw_event_router_execute_action(rule, &rule->actions[j], event, ctx, &local);
-            ESP_LOGI(TAG,
-                     "event=%s rule=%s action=%s done err=%s",
-                     event->event_id,
-                     rule->id,
-                     claw_event_router_action_kind_to_string(rule->actions[j].kind),
-                     esp_err_to_name(rule_err));
+            ESP_LOG_LEVEL(rule_err == ESP_OK ? ESP_LOG_DEBUG : ESP_LOG_WARN,
+                          TAG,
+                          "event=%s rule=%s action=%s done err=%s",
+                          event->event_id,
+                          rule->id,
+                          claw_event_router_action_kind_to_string(rule->actions[j].kind),
+                          esp_err_to_name(rule_err));
             if (rule_err != ESP_OK && !rule->actions[j].fail_open) {
                 break;
             }

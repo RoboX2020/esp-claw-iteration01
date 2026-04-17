@@ -203,6 +203,7 @@ esp_err_t claw_llm_http_post_json(const claw_llm_http_json_request_t *request,
     err = response_buffer_init(&buffer);
     if (err != ESP_OK) {
         *out_error_message = dup_printf("Out of memory allocating HTTP buffer");
+        ESP_LOGE(TAG, "OOM allocating HTTP response buffer");
         return err;
     }
 
@@ -217,6 +218,7 @@ esp_err_t claw_llm_http_post_json(const claw_llm_http_json_request_t *request,
     client = esp_http_client_init(&config);
     if (!client) {
         *out_error_message = dup_printf("Failed to create HTTP client");
+        ESP_LOGE(TAG, "Failed to create HTTP client for %s", request->url);
         err = ESP_FAIL;
         goto cleanup;
     }
@@ -241,7 +243,7 @@ esp_err_t claw_llm_http_post_json(const claw_llm_http_json_request_t *request,
     }
     esp_http_client_set_post_field(client, request->body, (int)strlen(request->body));
 
-    ESP_LOGI(TAG, "POST %s", request->url);
+    ESP_LOGD(TAG, "POST %s", request->url);
     err = esp_http_client_perform(client);
     if (err != ESP_OK) {
         *out_error_message = dup_printf("HTTP request failed: %s", esp_err_to_name(err));
@@ -250,7 +252,7 @@ esp_err_t claw_llm_http_post_json(const claw_llm_http_json_request_t *request,
     }
 
     status_code = esp_http_client_get_status_code(client);
-    ESP_LOGI(TAG, "HTTP status=%d", status_code);
+    ESP_LOGD(TAG, "HTTP status=%d", status_code);
     if (status_code != 200) {
         err = ESP_FAIL;
         *out_error_message = parse_error_message_body(buffer.data, status_code);
