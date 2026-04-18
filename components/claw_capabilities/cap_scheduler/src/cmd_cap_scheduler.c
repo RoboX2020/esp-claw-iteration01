@@ -112,7 +112,6 @@ static int scheduler_func(int argc, char **argv)
 {
     cap_scheduler_item_t item = {0};
     char *output = NULL;
-    const char *default_timezone = NULL;
     char *joined_json = NULL;
     char **parse_argv = argv;
     int parse_argc = argc;
@@ -192,11 +191,7 @@ static int scheduler_func(int argc, char **argv)
             return 1;
         }
 
-        default_timezone = s_cap_scheduler.default_timezone[0] ?
-            s_cap_scheduler.default_timezone : CAP_SCHEDULER_DEFAULT_TIMEZONE;
-        err = cap_scheduler_parse_item_json_string(scheduler_args.json->sval[0],
-                                                   &item,
-                                                   default_timezone);
+        err = cap_scheduler_parse_item_json_string(scheduler_args.json->sval[0], &item);
         if (err != ESP_OK) {
             printf("scheduler add input invalid: %s\n", esp_err_to_name(err));
             free(parse_argv == argv ? NULL : parse_argv);

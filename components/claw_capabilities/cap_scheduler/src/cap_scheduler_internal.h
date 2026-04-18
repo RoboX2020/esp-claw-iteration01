@@ -17,7 +17,6 @@
 
 #define CAP_SCHEDULER_STATE_KEY_SUFFIX       ".state"
 #define CAP_SCHEDULER_PATH_BUF_LEN           224
-#define CAP_SCHEDULER_DEFAULT_TIMEZONE       "UTC0"
 #define CAP_SCHEDULER_DEFAULT_TICK_MS        1000
 #define CAP_SCHEDULER_DEFAULT_MAX_ITEMS      32
 #define CAP_SCHEDULER_DEFAULT_STACK          6144
@@ -44,7 +43,6 @@ typedef struct {
     cap_scheduler_config_t config;
     char schedules_path[192];
     char state_path[192];
-    char default_timezone[CAP_SCHEDULER_TZ_LEN];
     cap_scheduler_entry_t *entries;
     size_t max_items;
     size_t item_count;
@@ -55,8 +53,7 @@ extern cap_scheduler_runtime_t s_cap_scheduler;
 
 int64_t cap_scheduler_now_ms(void);
 esp_err_t cap_scheduler_build_state_path(const char *schedules_path, char *out_path, size_t out_path_size);
-void cap_scheduler_apply_defaults(cap_scheduler_item_t *item, const char *default_timezone);
-bool cap_scheduler_is_supported_timezone(const char *timezone);
+void cap_scheduler_apply_defaults(cap_scheduler_item_t *item);
 esp_err_t cap_scheduler_validate_item(const cap_scheduler_item_t *item);
 esp_err_t cap_scheduler_compute_next_fire(const cap_scheduler_item_t *item,
                                           int64_t anchor_ms,
@@ -65,11 +62,8 @@ esp_err_t cap_scheduler_compute_next_fire(const cap_scheduler_item_t *item,
 esp_err_t cap_scheduler_load_items(const char *path,
                                    cap_scheduler_item_t *items,
                                    size_t max_items,
-                                   size_t *out_count,
-                                   const char *default_timezone);
-esp_err_t cap_scheduler_parse_item_json_string(const char *json,
-                                               cap_scheduler_item_t *item,
-                                               const char *default_timezone);
+                                   size_t *out_count);
+esp_err_t cap_scheduler_parse_item_json_string(const char *json, cap_scheduler_item_t *item);
 esp_err_t cap_scheduler_save_items(const char *path,
                                    const cap_scheduler_entry_t *entries,
                                    size_t entry_count);

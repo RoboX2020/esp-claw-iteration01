@@ -47,7 +47,7 @@ Use this skill when the user needs to inspect or control timer-based schedule ru
 
 ## Time semantics
 - Choose `interval` for relative periodic execution, such as "every 10 seconds", "every 5 minutes", "once per hour after startup", or general periodic polling, or when there are offline running needs.
-- Choose `cron` for calendar-based repeated execution, such as "every day at 08:00", "every Monday", "on the 1st day of each month", or "every 3 minutes aligned to wall-clock time". `cron` uses the device time zone stored in NVS and depends on valid wall-clock time. Supported field forms are `*`, `*/N`, or one explicit number in range; for example, `*/3 * * * *`.
+- Choose `cron` for calendar-based repeated execution, such as "every day at 08:00", "every Monday", "on the 1st day of each month", or "every 3 minutes aligned to wall-clock time". `cron` depends on valid wall-clock time and uses the device's current local time. Supported field forms are `*`, `*/N`, or one explicit number in range; for example, `*/3 * * * *`.
 
 
 ## MUST work with Event Router

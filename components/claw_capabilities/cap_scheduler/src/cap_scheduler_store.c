@@ -655,7 +655,7 @@ static bool cap_scheduler_status_from_string(const char *value, cap_scheduler_st
     return false;
 }
 
-static void cap_scheduler_parse_item_json(const cJSON *node, cap_scheduler_item_t *item, const char *default_timezone)
+static void cap_scheduler_parse_item_json(const cJSON *node, cap_scheduler_item_t *item)
 {
     const cJSON *value;
 
@@ -673,10 +673,6 @@ static void cap_scheduler_parse_item_json(const cJSON *node, cap_scheduler_item_
     value = cJSON_GetObjectItemCaseSensitive(node, "kind");
     if (cJSON_IsString(value)) {
         cap_scheduler_kind_from_string(value->valuestring, &item->kind);
-    }
-    value = cJSON_GetObjectItemCaseSensitive(node, "timezone");
-    if (cJSON_IsString(value)) {
-        strlcpy(item->timezone, value->valuestring, sizeof(item->timezone));
     }
     value = cJSON_GetObjectItemCaseSensitive(node, "start_at_ms");
     if (cJSON_IsNumber(value)) {
@@ -738,7 +734,7 @@ static void cap_scheduler_parse_item_json(const cJSON *node, cap_scheduler_item_
         item->max_runs = value->valueint;
     }
 
-    cap_scheduler_apply_defaults(item, default_timezone);
+    cap_scheduler_apply_defaults(item);
 }
 
 esp_err_t cap_scheduler_entry_to_json(const cap_scheduler_entry_t *entry, bool include_item, cJSON **out_json)
@@ -766,7 +762,6 @@ esp_err_t cap_scheduler_entry_to_json(const cap_scheduler_entry_t *entry, bool i
     if (include_item) {
         cJSON_AddBoolToObject(root, "enabled", entry->item.enabled);
         cJSON_AddStringToObject(root, "kind", cap_scheduler_kind_to_string(entry->item.kind));
-        cJSON_AddStringToObject(root, "timezone", entry->item.timezone);
         cJSON_AddNumberToObject(root, "start_at_ms", (double)entry->item.start_at_ms);
         cJSON_AddNumberToObject(root, "end_at_ms", (double)entry->item.end_at_ms);
         cJSON_AddNumberToObject(root, "interval_ms", (double)entry->item.interval_ms);
@@ -786,8 +781,7 @@ esp_err_t cap_scheduler_entry_to_json(const cap_scheduler_entry_t *entry, bool i
     return ESP_OK;
 }
 
-esp_err_t cap_scheduler_load_items(const char *path, cap_scheduler_item_t *items, size_t max_items, size_t *out_count,
-                                   const char *default_timezone)
+esp_err_t cap_scheduler_load_items(const char *path, cap_scheduler_item_t *items, size_t max_items, size_t *out_count)
 {
     char *buf = NULL;
     cJSON *root = NULL;
@@ -823,7 +817,7 @@ esp_err_t cap_scheduler_load_items(const char *path, cap_scheduler_item_t *items
             cJSON_Delete(root);
             return ESP_ERR_NO_MEM;
         }
-        cap_scheduler_parse_item_json(node, &items[count], default_timezone);
+        cap_scheduler_parse_item_json(node, &items[count]);
         err = cap_scheduler_validate_item(&items[count]);
         if (err != ESP_OK) {
             cJSON_Delete(root);
@@ -837,7 +831,7 @@ esp_err_t cap_scheduler_load_items(const char *path, cap_scheduler_item_t *items
     return ESP_OK;
 }
 
-esp_err_t cap_scheduler_parse_item_json_string(const char *json, cap_scheduler_item_t *item, const char *default_timezone)
+esp_err_t cap_scheduler_parse_item_json_string(const char *json, cap_scheduler_item_t *item)
 {
     char *normalized_json = NULL;
     char *fallback_json = NULL;
@@ -887,7 +881,7 @@ esp_err_t cap_scheduler_parse_item_json_string(const char *json, cap_scheduler_i
         return ESP_ERR_INVALID_ARG;
     }
 
-    cap_scheduler_parse_item_json(root, item, default_timezone);
+    cap_scheduler_parse_item_json(root, item);
     cJSON_Delete(root);
 
     err = cap_scheduler_validate_item(item);

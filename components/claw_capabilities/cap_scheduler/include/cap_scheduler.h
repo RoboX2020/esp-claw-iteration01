@@ -18,7 +18,6 @@ extern "C" {
 #endif
 
 #define CAP_SCHEDULER_ID_LEN 64
-#define CAP_SCHEDULER_TZ_LEN 32
 #define CAP_SCHEDULER_EXPR_LEN 64
 #define CAP_SCHEDULER_EVENT_TYPE_LEN 32
 #define CAP_SCHEDULER_EVENT_KEY_LEN 96
@@ -48,7 +47,6 @@ typedef struct {
     char id[CAP_SCHEDULER_ID_LEN];
     bool enabled;
     cap_scheduler_item_kind_t kind;
-    char timezone[CAP_SCHEDULER_TZ_LEN];
     int64_t start_at_ms;
     int64_t end_at_ms;
     int64_t interval_ms;
@@ -79,7 +77,6 @@ typedef claw_event_publish_fn cap_scheduler_publish_fn;
 
 typedef struct {
     const char *schedules_path;
-    const char *default_timezone;
     uint32_t tick_ms;
     uint32_t max_items;
     uint32_t task_stack_size;
