@@ -556,11 +556,7 @@ static esp_err_t cap_scheduler_load_from_disk_locked(void)
         return ESP_ERR_NO_MEM;
     }
 
-    err = cap_scheduler_load_items(s_cap_scheduler.schedules_path,
-                                   items,
-                                   s_cap_scheduler.max_items,
-                                   &item_count,
-                                   s_cap_scheduler.default_timezone);
+    err = cap_scheduler_load_items(s_cap_scheduler.schedules_path, items, s_cap_scheduler.max_items, &item_count);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to load schedules from %s: %s",
                  s_cap_scheduler.schedules_path,
@@ -646,9 +642,7 @@ static esp_err_t cap_scheduler_parse_id_input(const char *input_json, char *id, 
     return ESP_OK;
 }
 
-static esp_err_t cap_scheduler_parse_add_input(const char *input_json,
-                                               cap_scheduler_item_t *item,
-                                               const char *default_timezone)
+static esp_err_t cap_scheduler_parse_add_input(const char *input_json, cap_scheduler_item_t *item)
 {
     cJSON *root = NULL;
     const char *schedule_json = NULL;
@@ -669,7 +663,7 @@ static esp_err_t cap_scheduler_parse_add_input(const char *input_json,
         return ESP_ERR_INVALID_ARG;
     }
 
-    err = cap_scheduler_parse_item_json_string(schedule_json, item, default_timezone);
+    err = cap_scheduler_parse_item_json_string(schedule_json, item);
     cJSON_Delete(root);
     return err;
 }
@@ -762,10 +756,6 @@ esp_err_t cap_scheduler_init(const cap_scheduler_config_t *config)
     ESP_RETURN_ON_ERROR(cap_scheduler_build_state_path(schedules_path, s_cap_scheduler.state_path, sizeof(s_cap_scheduler.state_path)),
                         TAG,
                         "Failed to derive scheduler state key");
-    strlcpy(s_cap_scheduler.default_timezone,
-            config && config->default_timezone ? config->default_timezone : CAP_SCHEDULER_DEFAULT_TIMEZONE,
-            sizeof(s_cap_scheduler.default_timezone));
-
     s_cap_scheduler.max_items = s_cap_scheduler.config.max_items;
     s_cap_scheduler.entries = calloc(s_cap_scheduler.max_items, sizeof(cap_scheduler_entry_t));
     if (!s_cap_scheduler.entries) {
@@ -861,7 +851,7 @@ esp_err_t cap_scheduler_add(const cap_scheduler_item_t *item)
     }
 
     normalized_item = *item;
-    cap_scheduler_apply_defaults(&normalized_item, s_cap_scheduler.default_timezone);
+    cap_scheduler_apply_defaults(&normalized_item);
     if (cap_scheduler_validate_item(&normalized_item) != ESP_OK) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -907,7 +897,7 @@ esp_err_t cap_scheduler_update(const cap_scheduler_item_t *item)
     }
 
     normalized_item = *item;
-    cap_scheduler_apply_defaults(&normalized_item, s_cap_scheduler.default_timezone);
+    cap_scheduler_apply_defaults(&normalized_item);
     if (cap_scheduler_validate_item(&normalized_item) != ESP_OK) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -1238,7 +1228,6 @@ static esp_err_t cap_scheduler_execute_add(const char *input_json,
                                            size_t output_size)
 {
     cap_scheduler_item_t *item = NULL;
-    const char *default_timezone = NULL;
     esp_err_t err;
 
     (void)ctx;
@@ -1248,9 +1237,7 @@ static esp_err_t cap_scheduler_execute_add(const char *input_json,
         return ESP_ERR_NO_MEM;
     }
 
-    default_timezone = s_cap_scheduler.default_timezone[0] ?
-                       s_cap_scheduler.default_timezone : CAP_SCHEDULER_DEFAULT_TIMEZONE;
-    err = cap_scheduler_parse_add_input(input_json, item, default_timezone);
+    err = cap_scheduler_parse_add_input(input_json, item);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "scheduler add input invalid: %s", esp_err_to_name(err));
         goto cleanup;

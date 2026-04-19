@@ -3,7 +3,6 @@
     {
       "id": "lua_module_event_publisher",
       "file": "lua_module_event_publisher.md",
-      "title": "lua_module_event_publisher",
       "summary": "How to publish message, trigger, and custom events from Lua.",
       "cap_groups": [
         "cap_lua"

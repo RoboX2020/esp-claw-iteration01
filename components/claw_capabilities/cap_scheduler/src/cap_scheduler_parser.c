@@ -6,7 +6,6 @@
 #include "cap_scheduler_internal.h"
 
 #include <ctype.h>
-#include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
 #include <time.h>
@@ -65,35 +64,6 @@ typedef struct {
     bool wday[7];
 } cap_scheduler_cron_spec_t;
 
-static void cap_scheduler_with_timezone(const char *timezone,
-                                        void (*fn)(time_t seconds, struct tm *tm_info, void *user_ctx),
-                                        time_t seconds,
-                                        struct tm *tm_info,
-                                        void *user_ctx)
-{
-    const char *previous_tz = getenv("TZ");
-    char saved_tz[CAP_SCHEDULER_TZ_LEN] = {0};
-
-    if (previous_tz && previous_tz[0]) {
-        strlcpy(saved_tz, previous_tz, sizeof(saved_tz));
-    }
-    setenv("TZ", timezone && timezone[0] ? timezone : CAP_SCHEDULER_DEFAULT_TIMEZONE, 1);
-    tzset();
-    fn(seconds, tm_info, user_ctx);
-    if (saved_tz[0]) {
-        setenv("TZ", saved_tz, 1);
-    } else {
-        unsetenv("TZ");
-    }
-    tzset();
-}
-
-static void cap_scheduler_localtime_wrapper(time_t seconds, struct tm *tm_info, void *user_ctx)
-{
-    (void)user_ctx;
-    localtime_r(&seconds, tm_info);
-}
-
 static bool cap_scheduler_parse_cron_expr(const char *expr, cap_scheduler_cron_spec_t *out)
 {
     char buf[CAP_SCHEDULER_EXPR_LEN];
@@ -151,11 +121,7 @@ static bool cap_scheduler_compute_next_cron_fire(const cap_scheduler_item_t *ite
         time_t seconds = (time_t)(candidate_ms / 1000LL);
         struct tm tm_info = {0};
 
-        cap_scheduler_with_timezone(item->timezone[0] ? item->timezone : CAP_SCHEDULER_DEFAULT_TIMEZONE,
-                                    cap_scheduler_localtime_wrapper,
-                                    seconds,
-                                    &tm_info,
-                                    NULL);
+        localtime_r(&seconds, &tm_info);
 
         if (spec.minute[tm_info.tm_min] &&
             spec.hour[tm_info.tm_hour] &&
@@ -179,7 +145,7 @@ int64_t cap_scheduler_now_ms(void)
     return ((int64_t)tv.tv_sec * 1000LL) + (tv.tv_usec / 1000LL);
 }
 
-void cap_scheduler_apply_defaults(cap_scheduler_item_t *item, const char *default_timezone)
+void cap_scheduler_apply_defaults(cap_scheduler_item_t *item)
 {
     if (!item) {
         return;
@@ -200,25 +166,9 @@ void cap_scheduler_apply_defaults(cap_scheduler_item_t *item, const char *defaul
     if (!item->payload_json[0]) {
         strlcpy(item->payload_json, "{}", sizeof(item->payload_json));
     }
-    item->timezone[0] = '\0';
-    if (default_timezone && default_timezone[0]) {
-        strlcpy(item->timezone, default_timezone, sizeof(item->timezone));
-    }
-    if (!item->timezone[0]) {
-        strlcpy(item->timezone, CAP_SCHEDULER_DEFAULT_TIMEZONE, sizeof(item->timezone));
-    }
     if (!item->event_key[0]) {
         strlcpy(item->event_key, item->id, sizeof(item->event_key));
     }
-}
-
-bool cap_scheduler_is_supported_timezone(const char *timezone)
-{
-    if (!timezone || !timezone[0]) {
-        return false;
-    }
-
-    return true;
 }
 
 esp_err_t cap_scheduler_validate_item(const cap_scheduler_item_t *item)
@@ -226,10 +176,6 @@ esp_err_t cap_scheduler_validate_item(const cap_scheduler_item_t *item)
     if (!item || !item->id[0] || !item->event_key[0] || !item->event_type[0]) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (!cap_scheduler_is_supported_timezone(item->timezone)) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
     switch (item->kind) {
     case CAP_SCHEDULER_ITEM_ONCE:
         if (item->start_at_ms <= 0) {
