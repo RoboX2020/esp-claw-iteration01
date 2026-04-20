@@ -92,7 +92,7 @@ esp_err_t basic_demo_cli_start(void);
 
 typedef struct {
     char memory_session_root[64];
-    char memory_long_term_path[96];
+    char memory_root_dir[64];
     char skills_root_dir[64];
     char lua_root_dir[64];
     char router_rules_path[96];
@@ -107,7 +107,7 @@ static esp_err_t basic_demo_init_paths(basic_demo_paths_t *paths)
         return ESP_ERR_INVALID_STATE;
     }
     if (snprintf(paths->memory_session_root, sizeof(paths->memory_session_root), "%s/sessions", base) >= sizeof(paths->memory_session_root) ||
-        snprintf(paths->memory_long_term_path, sizeof(paths->memory_long_term_path), "%s/memory/MEMORY.md", base) >= sizeof(paths->memory_long_term_path) ||
+        snprintf(paths->memory_root_dir, sizeof(paths->memory_root_dir), "%s/memory", base) >= sizeof(paths->memory_root_dir) ||
         snprintf(paths->skills_root_dir, sizeof(paths->skills_root_dir), "%s/skills", base) >= sizeof(paths->skills_root_dir) ||
         snprintf(paths->lua_root_dir, sizeof(paths->lua_root_dir), "%s/scripts", base) >= sizeof(paths->lua_root_dir) ||
         snprintf(paths->router_rules_path, sizeof(paths->router_rules_path), "%s/router_rules/router_rules.json", base) >= sizeof(paths->router_rules_path) ||
@@ -144,18 +144,19 @@ static esp_err_t init_memory(const basic_demo_settings_t *settings, const basic_
 {
     claw_memory_config_t memory_config = {
         .session_root_dir = paths->memory_session_root,
-        .long_term_memory_path = paths->memory_long_term_path,
+        .memory_root_dir = paths->memory_root_dir,
         .max_session_messages = 20,
         .max_message_chars = 1024,
-        .llm_api_key = settings ? settings->llm_api_key : NULL,
-        .llm_backend_type = settings ? settings->llm_backend_type : NULL,
-        .llm_profile = settings ? settings->llm_profile : NULL,
-        .llm_provider = settings ? settings->llm_profile : NULL,
-        .llm_model = settings ? settings->llm_model : NULL,
-        .llm_base_url = settings ? settings->llm_base_url : NULL,
-        .llm_auth_type = settings ? settings->llm_auth_type : NULL,
-        .llm_timeout_ms = settings ? (uint32_t)strtoul(settings->llm_timeout_ms, NULL, 10) : 0,
-        .llm_image_max_bytes = 0,
+        .llm = {
+            .api_key = settings->llm_api_key,
+            .backend_type = settings->llm_backend_type,
+            .profile = settings->llm_profile,
+            .model = settings->llm_model,
+            .base_url = settings->llm_base_url,
+            .auth_type = settings->llm_auth_type,
+            .timeout_ms = (uint32_t)strtoul(settings->llm_timeout_ms, NULL, 10),
+            .image_max_bytes = 0,
+        },
 #if CONFIG_BASIC_DEMO_MEMORY_MODE_FULL
         .enable_async_extract_stage_note = true,
 #else

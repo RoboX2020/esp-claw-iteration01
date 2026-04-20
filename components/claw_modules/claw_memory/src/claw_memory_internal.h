@@ -37,7 +37,7 @@ typedef struct {
     int initialized;
     char session_root_dir[CLAW_MEMORY_MAX_PATH];
     char memory_root_dir[CLAW_MEMORY_MAX_PATH];
-    char long_term_memory_path[CLAW_MEMORY_MAX_PATH];
+    char markdown_path[CLAW_MEMORY_MAX_PATH];
     char records_path[CLAW_MEMORY_MAX_PATH];
     char index_path[CLAW_MEMORY_MAX_PATH];
     char digest_path[CLAW_MEMORY_MAX_PATH];
@@ -95,9 +95,6 @@ esp_err_t append_file_text(const char *path, const char *text);
 size_t file_size_bytes(const char *path);
 esp_err_t ensure_file_with_default(const char *path, const char *default_text);
 esp_err_t claw_memory_join_path(char *dst, size_t dst_size, const char *dir, const char *name);
-void derive_memory_root_from_markdown(const char *markdown_path,
-                                      char *root_dir,
-                                      size_t root_dir_size);
 
 size_t session_history_json_size(void);
 esp_err_t claw_memory_session_load_json(const char *session_id, char *buf, size_t size);

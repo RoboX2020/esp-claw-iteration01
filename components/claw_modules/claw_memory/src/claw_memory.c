@@ -274,25 +274,27 @@ esp_err_t claw_memory_init(const claw_memory_config_t *config)
     static const char *const default_index =
         "{\"version\":3,\"next_summary_id\":1,\"last_compact_digest_size\":0,\"summaries\":[],\"keyword_index\":{}}\n";
 
-    if (!config || !config->session_root_dir || !config->long_term_memory_path) {
+    if (!config || !config->session_root_dir || !config->memory_root_dir ||
+        !config->memory_root_dir[0]) {
         return ESP_ERR_INVALID_ARG;
     }
 
     memset(&s_memory, 0, sizeof(s_memory));
     safe_copy(s_memory.session_root_dir, sizeof(s_memory.session_root_dir), config->session_root_dir);
-    safe_copy(s_memory.long_term_memory_path,
-              sizeof(s_memory.long_term_memory_path),
-              config->long_term_memory_path);
-    derive_memory_root_from_markdown(config->long_term_memory_path,
-                                     s_memory.memory_root_dir,
-                                     sizeof(s_memory.memory_root_dir));
+    safe_copy(s_memory.memory_root_dir,
+              sizeof(s_memory.memory_root_dir),
+              config->memory_root_dir);
     s_memory.max_session_messages = config->max_session_messages ?
         config->max_session_messages : CLAW_MEMORY_DEFAULT_MAX_SESSION_MESSAGES;
     s_memory.max_message_chars = config->max_message_chars ?
         config->max_message_chars : CLAW_MEMORY_DEFAULT_MAX_MESSAGE_CHARS;
     s_memory.next_memory_seq = claw_memory_now_sec() % 10000U;
 
-    if (claw_memory_join_path(s_memory.records_path,
+    if (claw_memory_join_path(s_memory.markdown_path,
+                              sizeof(s_memory.markdown_path),
+                              s_memory.memory_root_dir,
+                              CLAW_MEMORY_MARKDOWN_FILE) != ESP_OK ||
+        claw_memory_join_path(s_memory.records_path,
                               sizeof(s_memory.records_path),
                               s_memory.memory_root_dir,
                               CLAW_MEMORY_RECORDS_FILE) != ESP_OK ||
@@ -319,7 +321,7 @@ esp_err_t claw_memory_init(const claw_memory_config_t *config)
     if (ensure_file_with_default(s_memory.records_path, "") != ESP_OK ||
         ensure_file_with_default(s_memory.index_path, default_index) != ESP_OK ||
         ensure_file_with_default(s_memory.digest_path, "") != ESP_OK ||
-        ensure_file_with_default(s_memory.long_term_memory_path, default_markdown) != ESP_OK) {
+        ensure_file_with_default(s_memory.markdown_path, default_markdown) != ESP_OK) {
         return ESP_FAIL;
     }
 

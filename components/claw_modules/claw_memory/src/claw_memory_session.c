@@ -399,7 +399,7 @@ static void claw_memory_async_extract_deinit(void)
 esp_err_t claw_memory_async_extract_init(const claw_memory_config_t *config)
 {
     BaseType_t task_result;
-    const char *profile = NULL;
+    const claw_memory_llm_config_t *llm = NULL;
     char *error_message = NULL;
     esp_err_t err;
 
@@ -408,27 +408,25 @@ esp_err_t claw_memory_async_extract_init(const claw_memory_config_t *config)
     if (!config || !config->enable_async_extract_stage_note) {
         return ESP_OK;
     }
-    if (!config->llm_api_key || !config->llm_api_key[0] ||
-        !config->llm_model || !config->llm_model[0] ||
-        ((!config->llm_profile || !config->llm_profile[0]) &&
-         (!config->llm_provider || !config->llm_provider[0]))) {
+    llm = &config->llm;
+
+    if (!llm->api_key || !llm->api_key[0] ||
+        !llm->model || !llm->model[0] ||
+        !llm->profile || !llm->profile[0]) {
         ESP_LOGI(TAG, "Async memory extract disabled: LLM config incomplete");
         return ESP_OK;
     }
 
-    profile = (config->llm_profile && config->llm_profile[0]) ?
-              config->llm_profile : config->llm_provider;
-
     err = claw_llm_runtime_init(&s_async_extract.runtime,
                                 &(claw_llm_runtime_config_t) {
-                                    .api_key = config->llm_api_key,
-                                    .backend_type = config->llm_backend_type,
-                                    .profile = profile,
-                                    .model = config->llm_model,
-                                    .base_url = config->llm_base_url,
-                                    .auth_type = config->llm_auth_type,
-                                    .timeout_ms = config->llm_timeout_ms,
-                                    .image_max_bytes = config->llm_image_max_bytes,
+                                    .api_key = llm->api_key,
+                                    .backend_type = llm->backend_type,
+                                    .profile = llm->profile,
+                                    .model = llm->model,
+                                    .base_url = llm->base_url,
+                                    .auth_type = llm->auth_type,
+                                    .timeout_ms = llm->timeout_ms,
+                                    .image_max_bytes = llm->image_max_bytes,
                                 },
                                 &error_message);
     if (err != ESP_OK) {

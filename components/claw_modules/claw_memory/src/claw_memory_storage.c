@@ -792,7 +792,7 @@ esp_err_t claw_memory_sync_markdown(const claw_memory_item_list_t *items, cJSON 
     if (err != ESP_OK) {
         return err;
     }
-    err = write_file_text(s_memory.long_term_memory_path, markdown);
+    err = write_file_text(s_memory.markdown_path, markdown);
     free(markdown);
     return err;
 }

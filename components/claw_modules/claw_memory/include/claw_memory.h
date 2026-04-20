@@ -17,19 +17,22 @@ extern "C" {
 #endif
 
 typedef struct {
+    const char *api_key;
+    const char *backend_type;
+    const char *profile;
+    const char *model;
+    const char *base_url;
+    const char *auth_type;
+    uint32_t timeout_ms;
+    size_t image_max_bytes;
+} claw_memory_llm_config_t;
+
+typedef struct {
     const char *session_root_dir;
-    const char *long_term_memory_path;
+    const char *memory_root_dir;
     size_t max_session_messages;
     size_t max_message_chars;
-    const char *llm_api_key;
-    const char *llm_backend_type;
-    const char *llm_profile;
-    const char *llm_provider;
-    const char *llm_model;
-    const char *llm_base_url;
-    const char *llm_auth_type;
-    uint32_t llm_timeout_ms;
-    size_t llm_image_max_bytes;
+    claw_memory_llm_config_t llm;
     bool enable_async_extract_stage_note;
 } claw_memory_config_t;
 

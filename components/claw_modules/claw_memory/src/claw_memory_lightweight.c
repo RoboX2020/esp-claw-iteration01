@@ -24,7 +24,7 @@ static esp_err_t claw_memory_long_term_lightweight_collect(const claw_core_reque
     }
 
     memset(out_context, 0, sizeof(*out_context));
-    err = read_file_dup(s_memory.long_term_memory_path, &content);
+    err = read_file_dup(s_memory.markdown_path, &content);
     if (err != ESP_OK) {
         return err;
     }

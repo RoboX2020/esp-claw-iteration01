@@ -764,23 +764,3 @@ esp_err_t claw_memory_join_path(char *dst,
     dst[dir_len + 1 + name_len] = '\0';
     return ESP_OK;
 }
-
-void derive_memory_root_from_markdown(const char *markdown_path,
-                                      char *root_dir,
-                                      size_t root_dir_size)
-{
-    char tmp[CLAW_MEMORY_MAX_PATH];
-    char *slash;
-
-    safe_copy(root_dir, root_dir_size, "");
-    if (!markdown_path || !markdown_path[0]) {
-        return;
-    }
-    safe_copy(tmp, sizeof(tmp), markdown_path);
-    slash = strrchr(tmp, '/');
-    if (!slash) {
-        return;
-    }
-    *slash = '\0';
-    safe_copy(root_dir, root_dir_size, tmp);
-}
