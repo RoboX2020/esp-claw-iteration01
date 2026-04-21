@@ -7,6 +7,7 @@
 
 #include "lua_module_adc.h"
 #include "lua_module_delay.h"
+#include "lua_module_capability.h"
 #include "lua_module_event_publisher.h"
 #include "lua_module_gpio.h"
 #include "lua_module_i2c.h"
@@ -37,6 +38,11 @@ esp_err_t basic_demo_lua_modules_register(void)
     esp_err_t err;
 
     err = lua_module_delay_register();
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = lua_module_capability_register();
     if (err != ESP_OK) {
         return err;
     }
