@@ -216,7 +216,7 @@ static int lua_module_adc_read(lua_State *L)
     return 1;
 }
 
-static int lua_module_adc_gpio(lua_State *L)
+static int lua_module_adc_get_gpio(lua_State *L)
 {
     lua_module_adc_ud_t *ud = lua_module_adc_get_ud(L, 1);
     lua_pushinteger(L, ud->gpio_num);
@@ -258,8 +258,8 @@ int luaopen_adc(lua_State *L)
         lua_setfield(L, -2, "__index");
         lua_pushcfunction(L, lua_module_adc_read);
         lua_setfield(L, -2, "read");
-        lua_pushcfunction(L, lua_module_adc_gpio);
-        lua_setfield(L, -2, "gpio");
+        lua_pushcfunction(L, lua_module_adc_get_gpio);
+        lua_setfield(L, -2, "get_gpio");
         lua_pushcfunction(L, lua_module_adc_close);
         lua_setfield(L, -2, "close");
     }

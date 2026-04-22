@@ -15,7 +15,7 @@ raw ADC codes.
     `pcall` if you want to handle that gracefully.
 - `ch:read()` → current voltage in millivolts (integer). Blocking, returns
   within microseconds.
-- `ch:gpio()` → the GPIO number this channel is bound to.
+- `ch:get_gpio()` → the GPIO number this channel is bound to.
 - `ch:close()` when you're done. Handles are also cleaned up on garbage
   collection, but explicit `close()` is preferred for determinism.
 

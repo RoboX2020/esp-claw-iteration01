@@ -9,7 +9,7 @@ local ch = adc.new(ADC_GPIO)
 
 print(string.format(
     "[adc_demo] reading gpio=%d for %d samples...",
-    ch:gpio(),
+    ch:get_gpio(),
     SAMPLE_COUNT
 ))
 
