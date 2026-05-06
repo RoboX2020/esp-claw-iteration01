@@ -2,11 +2,12 @@ build_doc:
   stage: build
   tags:
     - build
+    - brew
   image: node:24
   extends:
     - .rules:build:doc
   needs:
-    - job: build_application_basic_demo
+    - job: build_application_edge_agent
       artifacts: true
       optional: true
   script:

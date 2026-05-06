@@ -15,7 +15,7 @@
 #include "llm/claw_llm_runtime.h"
 
 #define CLAW_MEMORY_DEFAULT_MAX_SESSION_MESSAGES 20
-#define CLAW_MEMORY_DEFAULT_MAX_MESSAGE_CHARS    256
+#define CLAW_MEMORY_DEFAULT_MAX_MESSAGE_CHARS    4096
 #define CLAW_MEMORY_MAX_PATH                     192
 #define CLAW_MEMORY_MAX_SUMMARIES                3
 #define CLAW_MEMORY_MAX_LABEL_CHARS              8
@@ -32,6 +32,10 @@
 #define CLAW_MEMORY_IDENTITY_FILE                "identity.md"
 #define CLAW_MEMORY_USER_FILE                    "user.md"
 #define CLAW_MEMORY_AUTO_EXTRACT_MAX_ITEMS       3
+#define CLAW_MEMORY_SESSION_HEADER_MAGIC         0x31485343u /* CSH1 */
+#define CLAW_MEMORY_SESSION_HEADER_VERSION       2
+#define CLAW_MEMORY_SESSION_RAW_HEADER_SIZE      256
+#define CLAW_MEMORY_SESSION_HEADER_SIZE          345
 
 typedef struct {
     int initialized;
@@ -72,7 +76,11 @@ void claw_memory_normalize_session_text(const char *src,
                                         char *dst,
                                         size_t dst_size,
                                         size_t max_chars);
-esp_err_t claw_memory_append_session_line(FILE *file, const char *role, const char *text);
+esp_err_t claw_memory_write_session_json_record(FILE *file,
+                                                const char *role,
+                                                const char *text,
+                                                uint32_t *out_offset,
+                                                uint32_t *out_length);
 bool line_list_contains_item(const char *list, const char *item);
 esp_err_t line_list_append_unique(char **list, const char *item);
 esp_err_t line_list_merge_unique(char **dst, const char *src);
@@ -96,8 +104,6 @@ size_t file_size_bytes(const char *path);
 esp_err_t ensure_file_with_default(const char *path, const char *default_text);
 esp_err_t claw_memory_join_path(char *dst, size_t dst_size, const char *dir, const char *name);
 
-size_t session_history_json_size(void);
-esp_err_t claw_memory_session_load_json(const char *session_id, char *buf, size_t size);
 esp_err_t claw_memory_auto_extract_prepare_with_runtime(claw_llm_runtime_t *runtime,
                                                         const char *user_text,
                                                         claw_memory_message_intent_t *out_message_intent,

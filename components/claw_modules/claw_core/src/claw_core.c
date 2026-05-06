@@ -7,6 +7,7 @@
 #include "claw_task.h"
 
 #include <inttypes.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,7 +36,9 @@ static const char *TAG = "claw_core";
 #define CLAW_CORE_DEFAULT_REQUEST_Q       4
 #define CLAW_CORE_DEFAULT_RESPONSE_Q      4
 #define CLAW_CORE_DEFAULT_TOOL_ITERATIONS 10
+#ifndef CLAW_CORE_LOG_SNIPPET_LEN
 #define CLAW_CORE_LOG_SNIPPET_LEN         96
+#endif
 #define CLAW_CORE_TOOL_SUMMARY_MAX_LEN    768
 
 typedef struct {
@@ -107,9 +110,59 @@ static char *dup_string(const char *src)
     return strdup(src);
 }
 
+static char *dup_printf(const char *fmt, ...)
+{
+    va_list args;
+    va_list copy;
+    int needed;
+    char *buf;
+
+    va_start(args, fmt);
+    va_copy(copy, args);
+    needed = vsnprintf(NULL, 0, fmt, copy);
+    va_end(copy);
+    if (needed < 0) {
+        va_end(args);
+        return NULL;
+    }
+
+    buf = calloc(1, (size_t)needed + 1);
+    if (!buf) {
+        va_end(args);
+        return NULL;
+    }
+
+    vsnprintf(buf, (size_t)needed + 1, fmt, args);
+    va_end(args);
+    return buf;
+}
+
 static const char *log_snippet(const char *text)
 {
     return text ? text : "";
+}
+
+static int log_snippet_len(const char *text)
+{
+    if (!text) {
+        return 0;
+    }
+#if CLAW_CORE_LOG_SNIPPET_LEN == 0
+    return (int)strlen(text);
+#else
+    size_t len = strlen(text);
+    return (int)(len > CLAW_CORE_LOG_SNIPPET_LEN ? CLAW_CORE_LOG_SNIPPET_LEN : len);
+#endif
+}
+
+static const char *log_snippet_suffix(const char *text)
+{
+#if CLAW_CORE_LOG_SNIPPET_LEN == 0
+    (void)text;
+    return "";
+#else
+    return text && strlen(text) > CLAW_CORE_LOG_SNIPPET_LEN ? "..." : "";
+#endif
 }
 
 static const char *context_kind_to_string(claw_core_context_kind_t kind)
@@ -438,6 +491,7 @@ static esp_err_t build_response_payload_json(const claw_core_request_t *request,
 }
 
 static esp_err_t build_out_message_event_common(const char *event_id_prefix,
+                                                const char *event_type,
                                                 uint32_t request_id,
                                                 int64_t now_ms,
                                                 const char *channel,
@@ -445,8 +499,9 @@ static esp_err_t build_out_message_event_common(const char *event_id_prefix,
                                                 const char *text,
                                                 claw_event_t *out_event)
 {
-    if (!event_id_prefix || !event_id_prefix[0] || !channel || !channel[0] ||
-            !chat_id || !chat_id[0] || !text || !text[0] || !out_event) {
+    if (!event_id_prefix || !event_id_prefix[0] || !event_type || !event_type[0] ||
+            !channel || !channel[0] || !chat_id || !chat_id[0] ||
+            !text || !text[0] || !out_event) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -454,7 +509,7 @@ static esp_err_t build_out_message_event_common(const char *event_id_prefix,
     snprintf(out_event->event_id, sizeof(out_event->event_id),
              "%s-%" PRIu32 "-%" PRId64, event_id_prefix, request_id, now_ms);
     strlcpy(out_event->source_cap, "claw_core", sizeof(out_event->source_cap));
-    strlcpy(out_event->event_type, "out_message", sizeof(out_event->event_type));
+    strlcpy(out_event->event_type, event_type, sizeof(out_event->event_type));
     strlcpy(out_event->source_channel, channel, sizeof(out_event->source_channel));
     strlcpy(out_event->chat_id, chat_id, sizeof(out_event->chat_id));
     strlcpy(out_event->content_type, "text", sizeof(out_event->content_type));
@@ -499,6 +554,7 @@ static esp_err_t build_agent_out_message_event(const claw_core_request_t *reques
               response->target_chat_id : request->source_chat_id;
 
     err = build_out_message_event_common("agent",
+                                         "out_message",
                                          request->request_id,
                                          now_ms,
                                          channel,
@@ -570,6 +626,7 @@ static void publish_stage_event(const claw_core_request_t *request, const char *
     now_ms = claw_core_now_ms();
     err = build_out_message_event_common(
         "stage",
+        "agent_stage",
         request->request_id,
         now_ms,
         (request->target_channel && request->target_channel[0]) ?
@@ -774,47 +831,51 @@ static esp_err_t append_tool_array_json(cJSON *tools, const char *json_text)
 
 static char *build_current_turn_prompt(const claw_core_request_t *request)
 {
-    size_t total_len;
+#define CLAW_CORE_TURN_PROMPT_FMT \
+    "## Current Turn Context\n" \
+    "- request_id: %" PRIu32 "\n" \
+    "- source_cap: %s\n" \
+    "- source_channel: %s\n" \
+    "- source_chat_id: %s\n" \
+    "- source_sender_id: %s\n" \
+    "- source_message_id: %s\n"
+#define CLAW_CORE_TURN_PROMPT_ARGS(req) \
+    (req)->request_id, \
+    (req)->source_cap ? (req)->source_cap : "(unknown)", \
+    (req)->source_channel ? (req)->source_channel : "(unknown)", \
+    (req)->source_chat_id ? (req)->source_chat_id : "(unknown)", \
+    (req)->source_sender_id ? (req)->source_sender_id : "(unknown)", \
+    (req)->source_message_id ? (req)->source_message_id : "(none)"
+
+    int needed;
     char *text = NULL;
 
     if (!request) {
-        return NULL;
+        text = NULL;
+        goto cleanup;
     }
 
-    static const char *k_behavior_note =
-        "The agent result will be automatically sent to the user. "
-        "so it is generally not need to activate cap_im_xx to return messages.\n";
+    needed = snprintf(NULL, 0, CLAW_CORE_TURN_PROMPT_FMT, CLAW_CORE_TURN_PROMPT_ARGS(request));
+    if (needed < 0) {
+        ESP_LOGE(TAG, "failed to size current turn prompt");
+        text = NULL;
+        goto cleanup;
+    }
 
-    total_len = 256 + strlen(k_behavior_note);
-    total_len += request->source_cap ? strlen(request->source_cap) : 0;
-    total_len += request->source_channel ? strlen(request->source_channel) : 0;
-    total_len += request->source_chat_id ? strlen(request->source_chat_id) : 0;
-    total_len += request->source_sender_id ? strlen(request->source_sender_id) : 0;
-    total_len += request->source_message_id ? strlen(request->source_message_id) : 0;
-
-    text = calloc(1, total_len);
+    text = calloc(1, (size_t)needed + 1);
     if (!text) {
-        return NULL;
+        goto cleanup;
     }
 
-    snprintf(text,
-             total_len,
-             "## Current Turn Context\n"
-             "- request_id: %" PRIu32 "\n"
-             "- source_cap: %s\n"
-             "- source_channel: %s\n"
-             "- source_chat_id: %s\n"
-             "- source_sender_id: %s\n"
-             "- source_message_id: %s\n"
-             "\n## Behavior Notes\n"
-             "%s",
-             request->request_id,
-             request->source_cap ? request->source_cap : "(unknown)",
-             request->source_channel ? request->source_channel : "(unknown)",
-             request->source_chat_id ? request->source_chat_id : "(unknown)",
-             request->source_sender_id ? request->source_sender_id : "(unknown)",
-             request->source_message_id ? request->source_message_id : "(none)",
-             k_behavior_note);
+    if (snprintf(text, (size_t)needed + 1, CLAW_CORE_TURN_PROMPT_FMT, CLAW_CORE_TURN_PROMPT_ARGS(request)) < 0) {
+        ESP_LOGE(TAG, "failed to build current turn prompt");
+        free(text);
+        text = NULL;
+    }
+
+cleanup:
+#undef CLAW_CORE_TURN_PROMPT_ARGS
+#undef CLAW_CORE_TURN_PROMPT_FMT
     return text;
 }
 
@@ -917,10 +978,28 @@ static void claw_core_finish_from_plain_text(uint32_t request_id,
     free(response->error_message);
     response->error_message = NULL;
 
-    ESP_LOGI(TAG, "completion request=%" PRIu32 " status=done raw=%.96s%s",
+    ESP_LOGI(TAG, "completion request=%" PRIu32 " status=done raw=%.*s%s",
              request_id,
+             log_snippet_len(text),
              log_snippet(text),
-             strlen(text) > CLAW_CORE_LOG_SNIPPET_LEN ? "..." : "");
+             log_snippet_suffix(text));
+}
+
+static char *claw_core_build_session_failure_trace(const char *error_message,
+                                                   const char *tool_summary)
+{
+    const char *reason = (error_message && error_message[0]) ? error_message : "unknown error";
+
+    if (tool_summary && tool_summary[0]) {
+        return dup_printf("Session note: the previous request failed before producing a final answer.\n"
+                          "Reason: %s\n%s",
+                          reason,
+                          tool_summary);
+    }
+
+    return dup_printf("Session note: the previous request failed before producing a final answer.\n"
+                      "Reason: %s",
+                      reason);
 }
 
 static esp_err_t append_tool_results_message(cJSON *runtime_messages,
@@ -940,13 +1019,12 @@ static esp_err_t append_tool_results_message(cJSON *runtime_messages,
         cJSON *tool_message = NULL;
         esp_err_t err;
 
-        ESP_LOGI(TAG, "tool_call request=%" PRIu32 " name=%s args=%.96s%s",
+        ESP_LOGI(TAG, "tool_call request=%" PRIu32 " name=%s args=%.*s%s",
                  request->request_id,
                  response->tool_calls[i].name ? response->tool_calls[i].name : "(null)",
+                 log_snippet_len(response->tool_calls[i].arguments_json),
                  log_snippet(response->tool_calls[i].arguments_json),
-                 response->tool_calls[i].arguments_json &&
-                 strlen(response->tool_calls[i].arguments_json) > CLAW_CORE_LOG_SNIPPET_LEN ?
-                 "..." : "");
+                 log_snippet_suffix(response->tool_calls[i].arguments_json));
 
         err = claw_core_call_cap(response->tool_calls[i].name,
                                  response->tool_calls[i].arguments_json,
@@ -959,12 +1037,13 @@ static esp_err_t append_tool_results_message(cJSON *runtime_messages,
             return ESP_ERR_NO_MEM;
         }
 
-        ESP_LOGI(TAG, "tool_result request=%" PRIu32 " name=%s err=%s output=%.96s%s",
+        ESP_LOGI(TAG, "tool_result request=%" PRIu32 " name=%s err=%s output=%.*s%s",
                  request->request_id,
                  response->tool_calls[i].name ? response->tool_calls[i].name : "(null)",
                  esp_err_to_name(err),
+                 log_snippet_len(tool_output),
                  log_snippet(tool_output),
-                 strlen(tool_output) > CLAW_CORE_LOG_SNIPPET_LEN ? "..." : "");
+                 log_snippet_suffix(tool_output));
 
         if (tool_summary && tool_summary_size > 0 && response->tool_calls[i].name) {
             esp_err_t summary_err = append_tool_summary_line(tool_summary,
@@ -1305,6 +1384,28 @@ finish_request:
             ESP_LOGE(TAG, "request=%" PRIu32 " failed: %s",
                      request.view.request_id,
                      response.view.error_message ? response.view.error_message : esp_err_to_name(err));
+            if (s_core->append_session_turn &&
+                    request.view.session_id && request.view.session_id[0] &&
+                    request.view.user_text && request.view.user_text[0]) {
+                char *failure_trace = claw_core_build_session_failure_trace(response.view.error_message,
+                                                                            tool_summary);
+
+                if (!failure_trace) {
+                    ESP_LOGW(TAG, "append_session_turn skipped for failed request=%" PRIu32 ": no memory",
+                             request.view.request_id);
+                } else {
+                    esp_err_t append_err = s_core->append_session_turn(request.view.session_id,
+                                                                       request.view.user_text,
+                                                                       failure_trace,
+                                                                       s_core->append_session_turn_user_ctx);
+                    if (append_err != ESP_OK) {
+                        ESP_LOGW(TAG, "append_session_turn failed for failed request=%" PRIu32 ": %s",
+                                 request.view.request_id,
+                                 esp_err_to_name(append_err));
+                    }
+                    free(failure_trace);
+                }
+            }
         }
         publish_out_message_if_requested(&request, &response);
         if (request.view.flags & CLAW_CORE_REQUEST_FLAG_SKIP_RESPONSE_QUEUE) {
@@ -1409,6 +1510,7 @@ esp_err_t claw_core_init(const claw_core_config_t *config)
     llm_config.base_url = config->base_url;
     llm_config.auth_type = config->auth_type;
     llm_config.timeout_ms = config->timeout_ms;
+    llm_config.max_tokens = config->max_tokens;
     llm_config.image_max_bytes = config->image_max_bytes;
     err = claw_core_llm_init(&llm_config, &llm_error);
     if (err != ESP_OK) {

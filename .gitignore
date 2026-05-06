@@ -1,6 +1,5 @@
 # Build output
 build/
-dist/
 tmp/
 releases/
 
@@ -34,7 +33,6 @@ managed_components/
 # OS
 .DS_Store
 Thumbs.db
-references/
 .venv/
 
 .codex

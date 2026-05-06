@@ -6,18 +6,18 @@
 #include "claw_memory_internal.h"
 #include "claw_task.h"
 
-#include <ctype.h>
+#include <errno.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "esp_log.h"
-#include "esp_heap_caps.h"
 #include "freertos/idf_additions.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "mbedtls/base64.h"
 
 static const char *TAG = "claw_memory";
 
@@ -64,6 +64,29 @@ typedef struct {
 static claw_memory_pending_summary_t *s_pending_summaries = NULL;
 static claw_memory_async_extract_state_t s_async_extract = {0};
 static claw_memory_request_state_t *s_request_states = NULL;
+
+typedef struct {
+    uint32_t offset;
+    uint32_t length;
+} claw_memory_session_index_entry_t;
+
+typedef struct {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t max_slots;
+    uint32_t total_records;
+    claw_memory_session_index_entry_t entries[CLAW_MEMORY_DEFAULT_MAX_SESSION_MESSAGES];
+    uint8_t reserved[CLAW_MEMORY_SESSION_RAW_HEADER_SIZE -
+                     (sizeof(uint32_t) * 4) -
+                     (sizeof(claw_memory_session_index_entry_t) *
+                      CLAW_MEMORY_DEFAULT_MAX_SESSION_MESSAGES)];
+} claw_memory_session_header_t;
+
+_Static_assert(sizeof(claw_memory_session_header_t) == CLAW_MEMORY_SESSION_RAW_HEADER_SIZE,
+               "session history raw header size must remain fixed");
+_Static_assert(CLAW_MEMORY_SESSION_HEADER_SIZE ==
+               (((CLAW_MEMORY_SESSION_RAW_HEADER_SIZE + 2) / 3) * 4) + 1,
+               "session history file header must fit base64 header plus newline");
 
 static claw_memory_pending_summary_t *claw_memory_find_pending_summary(const char *session_id)
 {
@@ -429,6 +452,7 @@ esp_err_t claw_memory_async_extract_init(const claw_memory_config_t *config)
                                     .base_url = llm->base_url,
                                     .auth_type = llm->auth_type,
                                     .timeout_ms = llm->timeout_ms,
+                                    .max_tokens = llm->max_tokens,
                                     .image_max_bytes = llm->image_max_bytes,
                                 },
                                 &error_message);
@@ -543,180 +567,502 @@ esp_err_t claw_memory_async_extract_ensure_started(const claw_core_request_t *re
     return ESP_OK;
 }
 
-static void json_escape(const char *src, char *dst, size_t dst_size)
+static size_t session_history_effective_max_slots(void)
 {
-    size_t off = 0;
+    static bool clamp_logged = false;
+    size_t max_slots = s_memory.max_session_messages ? s_memory.max_session_messages :
+        CLAW_MEMORY_DEFAULT_MAX_SESSION_MESSAGES;
 
-    if (!dst || dst_size == 0) {
-        return;
-    }
-    dst[0] = '\0';
-    if (!src) {
-        return;
-    }
-
-    while (*src && off + 1 < dst_size) {
-        char ch = *src++;
-
-        if (ch == '"' || ch == '\\') {
-            if (off + 2 >= dst_size) {
-                break;
-            }
-            dst[off++] = '\\';
-            dst[off++] = ch;
-        } else {
-            dst[off++] = ch;
+    if (max_slots > CLAW_MEMORY_DEFAULT_MAX_SESSION_MESSAGES) {
+        if (!clamp_logged) {
+            ESP_LOGW(TAG,
+                     "Session history retention clamped from %u to %u indexed records",
+                     (unsigned)max_slots,
+                     (unsigned)CLAW_MEMORY_DEFAULT_MAX_SESSION_MESSAGES);
+            clamp_logged = true;
         }
+        max_slots = CLAW_MEMORY_DEFAULT_MAX_SESSION_MESSAGES;
     }
-    dst[off] = '\0';
+    if (max_slots == 0) {
+        max_slots = 1;
+    }
+    return max_slots;
 }
 
-size_t session_history_json_size(void)
+static void session_history_header_init(claw_memory_session_header_t *header,
+                                        size_t max_slots)
 {
-    size_t max_msgs = s_memory.max_session_messages;
-    size_t max_chars = s_memory.max_message_chars;
-
-    if (max_msgs == 0) {
-        max_msgs = CLAW_MEMORY_DEFAULT_MAX_SESSION_MESSAGES;
-    }
-    if (max_chars == 0 || max_chars > CLAW_MEMORY_DEFAULT_MAX_MESSAGE_CHARS) {
-        max_chars = CLAW_MEMORY_DEFAULT_MAX_MESSAGE_CHARS;
-    }
-
-    return (max_msgs * ((claw_memory_text_buffer_size(max_chars) * 2) + 64)) + 16;
+    memset(header, 0, sizeof(*header));
+    header->magic = CLAW_MEMORY_SESSION_HEADER_MAGIC;
+    header->version = CLAW_MEMORY_SESSION_HEADER_VERSION;
+    header->max_slots = (uint32_t)max_slots;
 }
 
-esp_err_t claw_memory_session_load_json(const char *session_id, char *buf, size_t size)
+static bool session_history_header_valid(const claw_memory_session_header_t *header)
+{
+    if (!header) {
+        return false;
+    }
+    if (header->magic != CLAW_MEMORY_SESSION_HEADER_MAGIC) {
+        ESP_LOGW(TAG, "Invalid session history header magic");
+        return false;
+    }
+    if (header->version != CLAW_MEMORY_SESSION_HEADER_VERSION) {
+        ESP_LOGW(TAG,
+                 "Unsupported session history header version %" PRIu32,
+                 header->version);
+        return false;
+    }
+    if (header->max_slots == 0 ||
+            header->max_slots > CLAW_MEMORY_DEFAULT_MAX_SESSION_MESSAGES) {
+        ESP_LOGW(TAG,
+                 "Invalid session history max_slots %" PRIu32,
+                 header->max_slots);
+        return false;
+    }
+    return true;
+}
+
+static esp_err_t session_history_read_header(FILE *file,
+                                             claw_memory_session_header_t *header)
+{
+    unsigned char encoded[CLAW_MEMORY_SESSION_HEADER_SIZE];
+    size_t decoded_len = 0;
+    size_t read_len;
+    int ret;
+
+    if (!file || !header) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (fseek(file, 0, SEEK_SET) != 0) {
+        ESP_LOGE(TAG, "seek session history header failed");
+        return ESP_FAIL;
+    }
+
+    memset(header, 0, sizeof(*header));
+    read_len = fread(encoded, 1, CLAW_MEMORY_SESSION_HEADER_SIZE, file);
+    if (read_len != CLAW_MEMORY_SESSION_HEADER_SIZE) {
+        if (ferror(file)) {
+            ESP_LOGE(TAG, "read session history header failed");
+            return ESP_FAIL;
+        }
+        ESP_LOGW(TAG,
+                 "Session history header is missing or short (%u/%u bytes)",
+                 (unsigned)read_len,
+                 (unsigned)CLAW_MEMORY_SESSION_HEADER_SIZE);
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (encoded[CLAW_MEMORY_SESSION_HEADER_SIZE - 1] != '\n') {
+        ESP_LOGW(TAG, "Session history base64 header separator missing");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ret = mbedtls_base64_decode((unsigned char *)header,
+                                sizeof(*header),
+                                &decoded_len,
+                                encoded,
+                                CLAW_MEMORY_SESSION_HEADER_SIZE - 1);
+    if (ret != 0 || decoded_len != sizeof(*header)) {
+        ESP_LOGW(TAG, "Invalid session history base64 header");
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!session_history_header_valid(header)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t session_history_write_header(FILE *file,
+                                              const claw_memory_session_header_t *header)
+{
+    unsigned char encoded[CLAW_MEMORY_SESSION_HEADER_SIZE];
+    size_t encoded_len = 0;
+
+    if (!file || !header) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!session_history_header_valid(header)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (mbedtls_base64_encode(encoded,
+                              sizeof(encoded),
+                              &encoded_len,
+                              (const unsigned char *)header,
+                              sizeof(*header)) != 0 ||
+            encoded_len != CLAW_MEMORY_SESSION_HEADER_SIZE - 1) {
+        ESP_LOGE(TAG, "encode session history header failed");
+        return ESP_FAIL;
+    }
+    encoded[encoded_len] = '\n';
+
+    if (fseek(file, 0, SEEK_SET) != 0) {
+        ESP_LOGE(TAG, "seek session history header for write failed");
+        return ESP_FAIL;
+    }
+    if (fwrite(encoded, 1, sizeof(encoded), file) != sizeof(encoded)) {
+        ESP_LOGE(TAG, "write session history header failed");
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+static size_t session_history_retained_count(const claw_memory_session_header_t *header)
+{
+    if (!header || header->max_slots == 0) {
+        return 0;
+    }
+    return header->total_records < header->max_slots ?
+        header->total_records : header->max_slots;
+}
+
+static size_t session_history_retained_slot(const claw_memory_session_header_t *header,
+                                            size_t index)
+{
+    size_t oldest_slot;
+
+    if (!header || header->max_slots == 0) {
+        return 0;
+    }
+
+    oldest_slot = (header->total_records < header->max_slots) ?
+        0 : (header->total_records % header->max_slots);
+    return (oldest_slot + index) % header->max_slots;
+}
+
+static size_t session_history_record_object_len(const claw_memory_session_index_entry_t *entry)
+{
+    if (!entry || entry->length == 0) {
+        return 0;
+    }
+    return entry->length - 1;
+}
+
+static esp_err_t session_history_measure_indexed(const claw_memory_session_header_t *header,
+                                                 size_t *out_count,
+                                                 size_t *out_json_size)
+{
+    size_t count;
+    size_t json_size = 3; /* '[' + ']' + trailing NUL */
+    size_t i;
+
+    if (!header || !out_count || !out_json_size) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    count = session_history_retained_count(header);
+    if (count == 0) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (count > 1) {
+        json_size += count - 1;
+    }
+
+    for (i = 0; i < count; i++) {
+        size_t slot = session_history_retained_slot(header, i);
+        const claw_memory_session_index_entry_t *entry = &header->entries[slot];
+        size_t object_len = session_history_record_object_len(entry);
+
+        if (entry->offset < CLAW_MEMORY_SESSION_HEADER_SIZE || object_len == 0) {
+            ESP_LOGW(TAG,
+                     "Invalid session history entry slot=%u offset=%" PRIu32 " length=%" PRIu32,
+                     (unsigned)slot,
+                     entry->offset,
+                     entry->length);
+            return ESP_ERR_INVALID_STATE;
+        }
+        json_size += object_len;
+    }
+
+    *out_count = count;
+    *out_json_size = json_size;
+    return ESP_OK;
+}
+
+static esp_err_t session_history_render_indexed_json(FILE *file,
+                                                     const claw_memory_session_header_t *header,
+                                                     size_t count,
+                                                     char *json,
+                                                     size_t json_size)
+{
+    char *cursor = json;
+    char *expected_end = json + json_size - 1;
+    size_t i;
+
+    if (!file || !header || !json || json_size < 3 || count == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *cursor++ = '[';
+    for (i = 0; i < count; i++) {
+        size_t slot = session_history_retained_slot(header, i);
+        const claw_memory_session_index_entry_t *entry = &header->entries[slot];
+        size_t object_len = session_history_record_object_len(entry);
+
+        if (i > 0) {
+            *cursor++ = ',';
+        }
+        if (fseek(file, (long)entry->offset, SEEK_SET) != 0) {
+            ESP_LOGE(TAG, "seek session history record failed");
+            return ESP_FAIL;
+        }
+        if (fread(cursor, 1, object_len, file) != object_len) {
+            ESP_LOGE(TAG, "read session history record failed");
+            return ESP_FAIL;
+        }
+        cursor += object_len;
+    }
+    *cursor++ = ']';
+    *cursor = '\0';
+
+    if (cursor != expected_end) {
+        ESP_LOGE(TAG, "session history json size mismatch");
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t session_history_close_file(FILE *file)
+{
+    if (!file) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (fclose(file) != 0) {
+        ESP_LOGE(TAG, "close session history failed: errno=%d", errno);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t session_history_recreate_file(const char *path,
+                                               FILE **out_file,
+                                               claw_memory_session_header_t *header)
+{
+    FILE *file = NULL;
+    esp_err_t err;
+
+    if (!path || !out_file || !header) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    file = fopen(path, "w+b");
+    if (!file) {
+        ESP_LOGE(TAG, "create session history %s failed: errno=%d", path, errno);
+        return ESP_FAIL;
+    }
+
+    session_history_header_init(header, session_history_effective_max_slots());
+    err = session_history_write_header(file, header);
+    if (err != ESP_OK) {
+        fclose(file);
+        return err;
+    }
+
+    *out_file = file;
+    return ESP_OK;
+}
+
+static esp_err_t session_history_validate_json_array(const char *json)
+{
+    cJSON *root = NULL;
+
+    if (!json) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    root = cJSON_ParseWithOpts(json, NULL, 1);
+    if (!root) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!cJSON_IsArray(root)) {
+        cJSON_Delete(root);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static esp_err_t claw_memory_session_load_json_alloc(const char *session_id, char **out_json)
 {
     char *path = NULL;
     FILE *file = NULL;
-    char *line = NULL;
-    char **roles = NULL;
-    char **contents = NULL;
-    char *escaped = NULL;
+    claw_memory_session_header_t header;
+    char *json = NULL;
     size_t count = 0;
-    size_t next = 0;
-    size_t i;
-    size_t max_msgs;
-    size_t max_chars;
-    size_t max_bytes;
-    size_t line_size;
-    size_t off = 0;
+    size_t json_size = 0;
+    esp_err_t err;
+    bool reset_file = false;
+    const char *reset_reason = NULL;
 
-    if (!session_id || !buf || size == 0) {
+    if (!session_id || !out_json) {
         return ESP_ERR_INVALID_ARG;
     }
     if (!s_memory.initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    max_msgs = s_memory.max_session_messages ? s_memory.max_session_messages :
-        CLAW_MEMORY_DEFAULT_MAX_SESSION_MESSAGES;
-    max_chars = s_memory.max_message_chars ? s_memory.max_message_chars :
-        CLAW_MEMORY_DEFAULT_MAX_MESSAGE_CHARS;
-    if (max_chars > CLAW_MEMORY_DEFAULT_MAX_MESSAGE_CHARS) {
-        max_chars = CLAW_MEMORY_DEFAULT_MAX_MESSAGE_CHARS;
-    }
-    max_bytes = claw_memory_text_buffer_size(max_chars) - 1;
-
+    *out_json = NULL;
     path = claw_memory_session_path_dup(session_id);
-    line_size = max_bytes + 16;
-    line = calloc(1, line_size);
-    escaped = calloc(1, (max_bytes * 2) + 1);
-    if (!path || !line || !escaped) {
-        free(path);
-        free(line);
-        free(escaped);
-        return ESP_ERR_NO_MEM;
+    if (!path) {
+        ESP_LOGE(TAG, "allocate session history path failed");
+        err = ESP_ERR_NO_MEM;
+        goto cleanup;
     }
 
-    file = fopen(path, "r");
+    file = fopen(path, "rb");
     if (!file) {
-        buf[0] = '\0';
-        free(path);
-        free(line);
-        free(escaped);
-        return ESP_ERR_NOT_FOUND;
+        err = (errno == ENOENT) ? ESP_ERR_NOT_FOUND : ESP_FAIL;
+        if (err != ESP_ERR_NOT_FOUND) {
+            ESP_LOGE(TAG, "open session history %s failed: errno=%d", path, errno);
+        }
+        goto cleanup;
     }
 
-    roles = calloc(max_msgs, sizeof(char *));
-    contents = calloc(max_msgs, sizeof(char *));
-    if (!roles || !contents) {
-        fclose(file);
-        free(path);
-        free(line);
-        free(escaped);
-        free(roles);
-        free(contents);
-        return ESP_ERR_NO_MEM;
+    err = session_history_read_header(file, &header);
+    if (err != ESP_OK) {
+        reset_file = true;
+        reset_reason = "invalid header";
+        err = ESP_ERR_NOT_FOUND;
+        goto cleanup;
     }
 
-    for (i = 0; i < max_msgs; i++) {
-        roles[i] = calloc(1, 16);
-        contents[i] = calloc(1, max_bytes + 1);
-        if (!roles[i] || !contents[i]) {
-            size_t j;
-            fclose(file);
-            free(path);
-            free(line);
-            free(escaped);
-            for (j = 0; j < max_msgs; j++) {
-                free(roles[j]);
-                free(contents[j]);
-            }
-            free(roles);
-            free(contents);
-            return ESP_ERR_NO_MEM;
+    err = session_history_measure_indexed(&header, &count, &json_size);
+    if (err == ESP_ERR_INVALID_STATE) {
+        reset_file = true;
+        reset_reason = "invalid index";
+        err = ESP_ERR_NOT_FOUND;
+        goto cleanup;
+    }
+    if (err != ESP_OK) {
+        goto cleanup;
+    }
+
+    json = calloc(1, json_size);
+    if (!json) {
+        ESP_LOGE(TAG, "allocate session history json failed");
+        err = ESP_ERR_NO_MEM;
+        goto cleanup;
+    }
+
+    err = session_history_render_indexed_json(file, &header, count, json, json_size);
+    if (err != ESP_OK) {
+        reset_file = true;
+        reset_reason = "read indexed records failed";
+        err = ESP_ERR_NOT_FOUND;
+        goto cleanup;
+    }
+
+    err = session_history_validate_json_array(json);
+    if (err != ESP_OK) {
+        reset_file = true;
+        reset_reason = "invalid rendered json";
+        err = ESP_ERR_NOT_FOUND;
+        goto cleanup;
+    }
+
+cleanup:
+    if (file && session_history_close_file(file) != ESP_OK && err == ESP_OK) {
+        err = ESP_FAIL;
+    }
+    if (reset_file && path) {
+        FILE *reset_file_handle = NULL;
+        claw_memory_session_header_t reset_header;
+        esp_err_t reset_err;
+
+        ESP_LOGW(TAG, "Resetting session history %s: %s", path, reset_reason);
+        reset_err = session_history_recreate_file(path, &reset_file_handle, &reset_header);
+        if (reset_err == ESP_OK) {
+            reset_err = session_history_close_file(reset_file_handle);
+        }
+        if (reset_err != ESP_OK) {
+            ESP_LOGE(TAG, "reset session history %s failed: %s",
+                     path,
+                     esp_err_to_name(reset_err));
+            err = reset_err;
         }
     }
-
-    while (fgets(line, (int)line_size, file)) {
-        char *tab = strchr(line, '\t');
-        char *value;
-
-        if (!tab) {
-            continue;
-        }
-        *tab = '\0';
-        value = tab + 1;
-        value[strcspn(value, "\r\n")] = '\0';
-        safe_copy(roles[next], 16, line);
-        safe_copy(contents[next], max_bytes + 1, value);
-        next = (next + 1) % max_msgs;
-        if (count < max_msgs) {
-            count++;
-        }
-    }
-    fclose(file);
     free(path);
-
-    off += snprintf(buf + off, size - off, "[");
-    for (i = 0; i < count && off + 1 < size; i++) {
-        size_t idx = (count < max_msgs) ? i : ((next + i) % max_msgs);
-        const char *role = strcmp(roles[idx], "assistant") == 0 ? "assistant" : "user";
-
-        json_escape(contents[idx], escaped, (max_bytes * 2) + 1);
-        off += snprintf(buf + off,
-                        size - off,
-                        "%s{\"role\":\"%s\",\"content\":\"%s\"}",
-                        i == 0 ? "" : ",",
-                        role,
-                        escaped);
-    }
-    if (off + 2 <= size) {
-        snprintf(buf + off, size - off, "]");
-    } else if (size > 0) {
-        buf[size - 1] = '\0';
+    if (err != ESP_OK) {
+        free(json);
+        return err;
     }
 
-    for (i = 0; i < max_msgs; i++) {
-        free(roles[i]);
-        free(contents[i]);
+    *out_json = json;
+    return ESP_OK;
+}
+
+static esp_err_t session_history_open_for_append(const char *path,
+                                                 FILE **out_file,
+                                                 claw_memory_session_header_t *header)
+{
+    FILE *file = NULL;
+    esp_err_t err;
+
+    if (!path || !out_file || !header) {
+        return ESP_ERR_INVALID_ARG;
     }
-    free(roles);
-    free(contents);
-    free(line);
-    free(escaped);
+    *out_file = NULL;
+
+    file = fopen(path, "r+b");
+    if (!file) {
+        if (errno != ENOENT) {
+            ESP_LOGE(TAG, "open session history %s failed: errno=%d", path, errno);
+            return ESP_FAIL;
+        }
+        return session_history_recreate_file(path, out_file, header);
+    }
+
+    err = session_history_read_header(file, header);
+    if (err == ESP_ERR_INVALID_STATE) {
+        ESP_LOGW(TAG, "Reinitializing legacy or invalid session history file %s", path);
+        if (session_history_close_file(file) != ESP_OK) {
+            return ESP_FAIL;
+        }
+        return session_history_recreate_file(path, out_file, header);
+    }
+    if (err != ESP_OK) {
+        fclose(file);
+        return err;
+    }
+
+    *out_file = file;
+    return ESP_OK;
+}
+
+static esp_err_t session_history_append_indexed_record(FILE *file,
+                                                       claw_memory_session_header_t *header,
+                                                       const char *role,
+                                                       const char *text)
+{
+    uint32_t offset = 0;
+    uint32_t length = 0;
+    uint32_t slot;
+    esp_err_t err;
+
+    if (!file || !header || !role || !text || header->max_slots == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (header->total_records == UINT32_MAX) {
+        ESP_LOGE(TAG, "session history total_records overflow");
+        return ESP_ERR_INVALID_SIZE;
+    }
+    if (fseek(file, 0, SEEK_END) != 0) {
+        ESP_LOGE(TAG, "seek session history EOF failed");
+        return ESP_FAIL;
+    }
+
+    err = claw_memory_write_session_json_record(file, role, text, &offset, &length);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "write session history %s record failed: %s", role, esp_err_to_name(err));
+        return err;
+    }
+
+    slot = header->total_records % header->max_slots;
+    header->entries[slot].offset = offset;
+    header->entries[slot].length = length;
+    header->total_records++;
+
     return ESP_OK;
 }
 
@@ -726,6 +1072,7 @@ esp_err_t claw_memory_session_append(const char *session_id,
 {
     char *path = NULL;
     FILE *file = NULL;
+    claw_memory_session_header_t header;
     esp_err_t err = ESP_OK;
 
     if (!session_id || !user_text || !assistant_text) {
@@ -737,23 +1084,30 @@ esp_err_t claw_memory_session_append(const char *session_id,
 
     path = claw_memory_session_path_dup(session_id);
     if (!path) {
+        ESP_LOGE(TAG, "allocate session history path failed");
         return ESP_ERR_NO_MEM;
     }
     if (ensure_parent_dir(path) != ESP_OK) {
         free(path);
         return ESP_FAIL;
     }
-    file = fopen(path, "a");
-    if (!file) {
+
+    err = session_history_open_for_append(path, &file, &header);
+    if (err != ESP_OK) {
         free(path);
-        return ESP_FAIL;
+        return err;
     }
 
-    err = claw_memory_append_session_line(file, "user", user_text);
+    err = session_history_append_indexed_record(file, &header, "user", user_text);
     if (err == ESP_OK) {
-        err = claw_memory_append_session_line(file, "assistant", assistant_text);
+        err = session_history_append_indexed_record(file, &header, "assistant", assistant_text);
     }
-    fclose(file);
+    if (err == ESP_OK) {
+        err = session_history_write_header(file, &header);
+    }
+    if (file && session_history_close_file(file) != ESP_OK && err == ESP_OK) {
+        err = ESP_FAIL;
+    }
     free(path);
     return err;
 }
@@ -815,7 +1169,6 @@ static esp_err_t claw_memory_session_history_collect(const claw_core_request_t *
                                                      void *user_ctx)
 {
     char *content = NULL;
-    size_t content_size;
     esp_err_t err;
 
     (void)user_ctx;
@@ -825,18 +1178,12 @@ static esp_err_t claw_memory_session_history_collect(const claw_core_request_t *
     }
 
     memset(out_context, 0, sizeof(*out_context));
-    content_size = session_history_json_size();
-    content = calloc(1, content_size);
-    if (!content) {
-        return ESP_ERR_NO_MEM;
-    }
 
-    err = claw_memory_session_load_json(request->session_id, content, content_size);
+    err = claw_memory_session_load_json_alloc(request->session_id, &content);
     if (err != ESP_OK) {
-        free(content);
         return err;
     }
-    if (!content[0] || strcmp(content, "[]") == 0) {
+    if (!content || !content[0] || strcmp(content, "[]") == 0) {
         free(content);
         return ESP_ERR_NOT_FOUND;
     }

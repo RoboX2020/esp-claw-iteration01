@@ -59,14 +59,6 @@ static const char *TAG = "cap_im_qq";
 #define CAP_IM_QQ_FILE_TYPE_IMAGE 1
 #define CAP_IM_QQ_FILE_TYPE_FILE  4
 
-#ifndef BASIC_DEMO_QQ_APP_ID
-#define BASIC_DEMO_QQ_APP_ID ""
-#endif
-
-#ifndef BASIC_DEMO_QQ_APP_SECRET
-#define BASIC_DEMO_QQ_APP_SECRET ""
-#endif
-
 typedef struct {
     char *buf;
     size_t len;
@@ -117,8 +109,6 @@ typedef struct {
 } cap_im_qq_state_t;
 
 static cap_im_qq_state_t s_qq = {
-    .app_id = BASIC_DEMO_QQ_APP_ID,
-    .app_secret = BASIC_DEMO_QQ_APP_SECRET,
     .max_inbound_file_bytes = 2 * 1024 * 1024,
     .heartbeat_interval_ms = 30000,
     .last_seq = -1,
@@ -423,7 +413,15 @@ static esp_err_t cap_im_qq_get_access_token(void)
     config.user_data = &resp;
     config.timeout_ms = 15000;
     config.buffer_size = 1024;
+#if CONFIG_HTTP_REUSE_ENABLE
+    /*
+     * With HTTP reuse, keep buffer_size / buffer_size_tx consistent across pooled
+     * clients; esp_http_client has no API to resize RX or TX buffers after init.
+     */
+    config.buffer_size_tx = 2048;
+#else
     config.buffer_size_tx = 1024;
+#endif
     config.crt_bundle_attach = esp_crt_bundle_attach;
 
     client = esp_http_client_init(&config);
@@ -508,6 +506,13 @@ retry:
     config.user_data = &resp;
     config.timeout_ms = 10000;
     config.buffer_size = 1024;
+#if CONFIG_HTTP_REUSE_ENABLE
+    /*
+     * With HTTP reuse, keep buffer_size / buffer_size_tx consistent across pooled
+     * clients; esp_http_client has no API to resize RX or TX buffers after init.
+     */
+    config.buffer_size_tx = 2048;
+#endif
     config.crt_bundle_attach = esp_crt_bundle_attach;
 
     client = esp_http_client_init(&config);
@@ -1995,6 +2000,11 @@ esp_err_t cap_im_qq_set_attachment_config(
 
 esp_err_t cap_im_qq_start(void)
 {
+    if (s_qq.app_id[0] == '\0' || s_qq.app_secret[0] == '\0') {
+        ESP_LOGE(TAG, "QQ credentials are not configured");
+        return ESP_ERR_INVALID_STATE;
+    }
+
     return cap_im_qq_gateway_start();
 }
 
